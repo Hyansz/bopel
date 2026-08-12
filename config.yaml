@@ -1,0 +1,17 @@
+app:
+  name: Bopel Automation Toolkit
+  version: "1.0.0"
+  subtitle: Internal Warehouse Utilities
+
+tools:
+  - name: Checklist Automation
+    script: check.py
+    description: Checklist pesanan dan validasi harga Shopee vs aplikasi
+
+  - name: Inventory Scanner
+    script: scan.py
+    description: Scan status pembayaran dan validasi Excel
+
+logging:
+  level: INFO
+  file: logs/app.log

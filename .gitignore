@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Log & data output (screenshot, metrik, log aplikasi, riwayat sesi)
+logs/
+
+# Hasil scan & checkpoint (data rahasia warehouse, jangan di-commit)
+hasil_scan*.xlsx
+checkpoint_*.xlsx
