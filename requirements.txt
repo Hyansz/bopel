@@ -1,4 +1,25 @@
-textual>=0.40.0
-rich>=13.0.0
-pyyaml>=6.0
-psutil>=5.9.0
+# Versi di-pin sesuai yang terinstall & teruji di environment (2026-08-12)
+# Jangan upgrade sembarangan — automation (pyautogui) sensitif terhadap breaking change.
+pyyaml==6.0.3
+psutil==7.2.2
+
+# Automation tools (dipakai check.py & scan.py)
+pyautogui==0.9.54
+pyperclip==1.9.0
+openpyxl==3.1.5
+
+# Window activation (core/window.py) — ganti alt-tab manual
+pywin32==311
+
+# Screenshot MCP bopel_ui_tester: SVG -> PNG (server.py get_screenshot)
+cairosvg==2.9.0
+
+# Migrasi desktop app: pywebview (UI web, backend EdgeChromium/WebView2 via pythonnet)
+# pythonnet + clr_loader + bottle + proxy_tools di-pull otomatis oleh pywebview.
+pywebview==6.2.1
+
+# Screenshot window pywebview + test helpers
+pillow==12.2.0
+
+# Auto-Fetch Shopee (shopee_fetch.py): otomasi Chrome profile toko via Playwright
+playwright==1.62.0
