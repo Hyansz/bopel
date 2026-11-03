@@ -10,4 +10,4 @@ logs/
 
 # Hasil scan & checkpoint (data rahasia warehouse, jangan di-commit)
 hasil_scan*.xlsx
-checkpoint_*.xlsx
+checkpoint_*.xlsxnul
