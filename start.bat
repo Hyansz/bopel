@@ -1,39 +1,51 @@
 @echo off
-REM =============================
-REM BOPEL — versi pywebview (desktop app UI web)
-REM (Textual TUI lama: start_tui.bat)
-REM
-REM Dijalankan dengan pythonw.exe + `start` (DETACHED) supaya TIDAK ada
-REM console window yang menempel ke app.py — fix sesi 2026-08-14:
-REM sebelumnya `python app.py` (python.exe) selalu membuka console
-REM (bukti: core/launcher.py sudah CREATE_NO_WINDOW, jadi console bukan
-REM dari subprocess tool). Kalau mau lihat log/error di console saat
-REM development: pakai start_debug.bat (python.exe biasa).
-REM =============================
+title BOPEL AUTOMATION TOOLKIT
 cd /d "%~dp0"
 
-where pythonw >nul 2>nul
+REM =============================
+REM UTF-8 output
+REM =============================
+chcp 65001 >nul 2>nul
+
+REM =============================
+REM Auto-relaunch ke Windows Terminal (kalau ada)
+REM =============================
+if defined WT_SESSION (
+    REM Sudah di Windows Terminal, lanjut
+    goto :run
+)
+where wt.exe >nul 2>nul
 if %errorlevel%==0 (
-    start "" pythonw app.py
-    exit /b 0
+    wt.exe "%~f0"
+    exit /b
 )
 
+:run
+REM =============================
+REM Cek Python ada atau enggak
+REM =============================
 where python >nul 2>nul
 if %errorlevel%==0 (
-    start "" python app.py
-    exit /b 0
+    cls
+    python main.py
+    goto :selesai
 )
 
 where py >nul 2>nul
 if %errorlevel%==0 (
-    start "" py app.py
-    exit /b 0
+    cls
+    py main.py
+    goto :selesai
 )
 
 echo.
-echo [ERROR] Python gak ketemu di komputer ini.
+echo ❌ Python gak ketemu di komputer ini.
 echo    Install dulu dari https://www.python.org/downloads/
 echo    Pas install, centang "Add Python to PATH".
 echo.
 pause
 exit /b 1
+
+:selesai
+echo.
+pause

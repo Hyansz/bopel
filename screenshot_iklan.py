@@ -36,6 +36,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.caption import bangun_teks_caption
+from core.clipboard import copy_files_with_caption
 from core.config import Config, ConfigError
 from core.window import (
     activate_window,
@@ -468,13 +469,23 @@ def main() -> None:
 
     ok = 0
     used_hwnds: set[int] = set()
+    success_paths = []
+    success_stores = []
     for store in stores:
         path, hwnd = _capture_store(store, start_date, end_date, used_hwnds)
         if path is not None:
             ok += 1
+            success_paths.append(path)
+            success_stores.append(store)
             if hwnd:
                 used_hwnds.add(hwnd)
         print()
+
+    if success_paths:
+        caption = bangun_teks_caption(success_stores)
+        if copy_files_with_caption(success_paths, caption):
+            print(f"📌 {len(success_paths)} screenshot + caption tersalin. Paste ke WhatsApp.")
+
     print(f"\n✅ Selesai: {ok}/{len(stores)} toko berhasil di-screenshot.")
 
 

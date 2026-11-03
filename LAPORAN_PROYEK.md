@@ -1,7 +1,26 @@
 # LAPORAN STRUKTUR, ALUR KERJA & PROGRES — BOPEL Automation Toolkit
 
-> Terakhir diupdate: 2026-11-03 (sesi: **Recovery & Architectural Cleanup: `core/caption.py`, ModuleNotFoundError Fix, Startup Smoke Test**)
+> Terakhir diupdate: 2026-11-03 (sesi: **Restorasi TUI Textual, Pemindahan Clipboard Helper ke `core/clipboard.py`, Verifikasi Screenshot Iklan & Tes Lulus**)
 > Riwayat detail per sesi digabung di bawah ini.
+
+## Session Report — 2026-11-03 (Restorasi TUI Textual & Clipboard Screenshot Iklan)
+
+### Ringkasan
+- Melakukan backup workspace ke `C:\robot\bopel_backup_3_2026-11-03_13-58-40` dan membuat branch git `backup-sebelum-undo-tampilan`.
+- Mengembalikan antarmuka TUI Textual (`main.py`, `ui/`, `start_tui.bat`) sesuai permintaan eksplisit user, serta menghapus file Pywebview/SPA yang tidak diminta (`app.py`, `web/index.html`, `web/style.css`).
+- Memindahkan fungsi helper clipboard (`make_hdrop_bytes`, `_dropfiles_header`, `png_to_dib_bytes`, `png_to_data_uri`, `copy_files_with_caption`) ke `core/clipboard.py`.
+- Mengintegrasikan penyalinan otomatis screenshot iklan dan caption (`CF_HDROP` + `CF_UNICODETEXT`) di `screenshot_iklan.py` saat selesai berjalan.
+- Memperbarui startup smoke test (`test_startup_smoke.py`) untuk memvalidasi TUI (`main.py`, `ui/app.py`, `textual`, `rich`, `config.yaml` 2 mode).
+- Memperbarui `test_copy_image.py` agar mengimpor helper dari `core.clipboard`.
+- Seluruh test suite Python (`test_*.py`, total 7 file, termasuk `screenshot_iklan` 37 tes), Node check (`node --check web/app.js`), `py_compile`, dan startup smoke test **PASS**.
+
+### Status Testing
+- Python test suites (`test_*.py`): 7/7 file PASS (`PYTHONUTF8=1`).
+- Py_compile: Semua file `.py` sukses.
+- Node check & timing tests: OK (exit 0).
+- Startup smoke test: PASS (`✅ Startup smoke test TUI PASS`).
+
+---
 
 ## Session Report — 2026-11-03 (Recovery & UI 404 Fix)
 

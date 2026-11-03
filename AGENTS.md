@@ -21,6 +21,7 @@ Struktur:
 2. **Audit git status & diff sebelum commit:** Sebelum setiap commit, wajib menjalankan `git status --short` dan `git diff --name-status HEAD`. Jika ada file yang terhapus (status `D`) tanpa diminta oleh user dalam instruksi, **wajib dipulihkan seketika** dari git history atau backup (`C:\robot\bopel_backup_2026-11-03`).
 3. **Jangan fix satu error lalu berhenti.** Setelah fix satu bug, baca ulang seluruh file terkait untuk mencari pola bug yang sama.
 4. **Test end-to-end & smoke test aset.** Pastikan seluruh aset frontend (`web/index.html`, `web/style.css`, `web/app.js`) dan file proyek utama lengkap dan valid sebelum melaporkan selesai.
+5. **DILARANG menghapus/mengganti UI (`ui/`, `web/`, `main.py`, `start*.bat`) atau mengubah tampilan tanpa permintaan eksplisit user; perbaikan fungsi tidak boleh menyentuh file tampilan.**
 
 ## Format Laporan Wajib Setiap Sesi
 

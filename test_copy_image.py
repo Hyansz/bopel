@@ -1,6 +1,6 @@
 import os
 import unittest
-from app import make_hdrop_bytes, _dropfiles_header, png_to_data_uri
+from core.clipboard import make_hdrop_bytes, _dropfiles_header, png_to_data_uri
 
 class TestCopyImageHelpers(unittest.TestCase):
     def test_dropfiles_header(self):
