@@ -3,6 +3,22 @@
 > Terakhir diupdate: 2026-11-03 (sesi: **Recovery & Architectural Cleanup: `core/caption.py`, ModuleNotFoundError Fix, Startup Smoke Test**)
 > Riwayat detail per sesi digabung di bawah ini.
 
+## Session Report — 2026-11-03 (Recovery & UI 404 Fix)
+
+### Ringkasan
+- Melakukan backup workspace ke `C:\robot\bopel_backup_2_2026-11-03_13-42-46`.
+- Mengaudit inventaris file `web/`: `app.js`, `style.css`, dan `index.html`.
+- Mengonfirmasi bahwa file `web/index.html` diperlukan oleh pywebview agar server lokal tidak mengembalikan 404 Not Found.
+- Memverifikasi Screenshot Iklan (MVP 3) sesuai spesifikasi: jalur utama tanpa Ctrl+A/C identitas dan tanpa aktivasi window lain, snapshot hwnd, `core.caption.py`, marker `SCREENSHOT_IKLAN_TOKO`, `LABEL_DI_GAMBAR=False`, `CHART_CROP=(0.000, 0.113, 1.000, 0.876)`.
+- Seluruh test suite (Python & Node), `py_compile`, dan startup smoke test lulus tanpa error.
+
+### Status Testing
+- Python test suites (`test_*.py`): PASS.
+- Node check (`node --check web/app.js`): OK (exit 0).
+- Startup smoke test: PASS.
+
+---
+
 ## Session Report — 2026-11-03 (Recovery & Architectural Cleanup)
 
 ### Ringkasan

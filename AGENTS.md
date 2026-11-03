@@ -15,18 +15,12 @@ Struktur:
 - `config.yaml` — daftar tools yang muncul di sidebar
 - `logs/` — log file aplikasi
 
-## Aturan Debugging
+## Aturan Debugging & Keamanan File
 
-1. **Jangan fix satu error lalu berhenti.** Setelah fix satu bug, **baca ulang seluruh
-   file terkait** (baik di Python `app.py`, core, maupun frontend SPA di `web/` seperti `web/index.html`, `web/style.css`, `web/app.js`) untuk cari pola bug yang sama.
-
-2. **Frontend SPA & Pywebview:** Project ini menggunakan `pywebview` dengan SPA murni (`web/`). Pastikan styling menggunakan CSS standar browser dan JavaScript modular tanpa framework berat.
-
-3. **Test end-to-end sebelum lapor selesai.** Jalankan aplikasinya
-   (`start.bat` atau `python app.py`) sampai tidak crash dan dashboard bisa muncul.
-
-4. **Kalau nemu bug yang sama classnya di lebih dari satu tempat**, fix semua
-   sekaligus, jangan tunggu di-report satu-satu oleh user.
+1. **DILARANG keras menghapus file dengan glob/wildcard** (`rm *.py`, `git clean -fdx` tanpa pengecualian eksplisit, dll.).
+2. **Audit git status & diff sebelum commit:** Sebelum setiap commit, wajib menjalankan `git status --short` dan `git diff --name-status HEAD`. Jika ada file yang terhapus (status `D`) tanpa diminta oleh user dalam instruksi, **wajib dipulihkan seketika** dari git history atau backup (`C:\robot\bopel_backup_2026-11-03`).
+3. **Jangan fix satu error lalu berhenti.** Setelah fix satu bug, baca ulang seluruh file terkait untuk mencari pola bug yang sama.
+4. **Test end-to-end & smoke test aset.** Pastikan seluruh aset frontend (`web/index.html`, `web/style.css`, `web/app.js`) dan file proyek utama lengkap dan valid sebelum melaporkan selesai.
 
 ## Format Laporan Wajib Setiap Sesi
 

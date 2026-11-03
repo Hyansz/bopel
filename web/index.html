@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bopel Automation Toolkit</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1 id="app-title">Bopel</h1>
+        <span id="app-version">v1.0.0</span>
+      </div>
+      <nav class="sidebar-nav">
+        <button class="sb-item active" data-nav="dashboard">Dashboard</button>
+        <div class="sb-section-title">Tools</div>
+        <div id="sidebar-tools"></div>
+        <div class="sb-section-title">System</div>
+        <button class="sb-item" data-nav="logs">Log Sistem</button>
+        <button class="sb-item" data-nav="settings">Pengaturan</button>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="sb-item sb-exit" data-nav="exit">Keluar</button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Dashboard Screen -->
+      <section class="screen active" data-section="dashboard">
+        <div class="screen-header">
+          <h2>Dashboard</h2>
+          <p>Selamat datang di Bopel Automation Toolkit</p>
+        </div>
+        <div class="dashboard-grid">
+          <div class="card">
+            <h3>Status Sistem</h3>
+            <div id="sys-info" class="sys-info-box">Memuat info sistem...</div>
+          </div>
+          <div class="card">
+            <h3>Quick Start</h3>
+            <p>Pilih tool dari sidebar di sebelah kiri untuk mulai menjalankan otomatisasi warehouse.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tool Screen -->
+      <section class="screen" data-section="tool">
+        <div class="screen-header">
+          <h2 id="tool-name">Tool Name</h2>
+          <p id="tool-desc">Tool description</p>
+        </div>
+        <div class="tool-controls">
+          <div id="mode-btns" class="mode-btns"></div>
+          <div id="action-btns" class="action-btns">
+            <button id="start-btn" class="btn primary">Start</button>
+            <button id="stop-btn" class="btn danger" disabled>Stop</button>
+          </div>
+        </div>
+        <div class="tool-status-bar">
+          <span id="tool-status" class="tool-status idle">Status: Idle</span>
+          <progress id="tool-progress" value="0" max="100"></progress>
+        </div>
+        <div class="summary-cards">
+          <div class="scard"><span>Total</span><b id="sum-total">--</b></div>
+          <div class="scard"><span>OK</span><b id="sum-ok">--</b></div>
+          <div class="scard"><span>Beda</span><b id="sum-beda">--</b></div>
+          <div class="scard"><span>Not Found</span><b id="sum-notfound">--</b></div>
+          <div class="scard"><span>Durasi</span><b id="sum-durasi">--</b></div>
+        </div>
+        <div class="tool-output">
+          <div class="output-header">
+            <h3>Log Eksekusi</h3>
+            <button id="clear-log" class="btn sm">Bersihkan Log</button>
+          </div>
+          <pre id="log-pre" class="log-pre"></pre>
+        </div>
+      </section>
+
+      <!-- Logs Screen -->
+      <section class="screen" data-section="logs">
+        <div class="screen-header">
+          <h2>Log Sistem</h2>
+          <p>Log aktivitas aplikasi dan error</p>
+        </div>
+        <div class="tool-output">
+          <pre id="system-log-pre" class="log-pre"></pre>
+        </div>
+      </section>
+
+      <!-- Settings Screen -->
+      <section class="screen" data-section="settings">
+        <div class="screen-header">
+          <h2>Pengaturan</h2>
+          <p>Konfigurasi toko dan parameter aplikasi</p>
+        </div>
+        <div class="card">
+          <div id="settings-content">Memuat pengaturan...</div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
