@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from core.config import Config, ConfigError
+from core.caption import bangun_teks_caption
 from core.launcher import ToolLauncher
 from core.window import activate_window, find_target_window
 from core.system import (
@@ -258,32 +259,19 @@ class Api:
 
 
 
-    def copy_files(self, paths_json: str) -> dict:
-        """Salin DAFTAR FILE ke clipboard sebagai CF_HDROP (file drop).
-
-        Screenshot Iklan revisi 2026-09-17: user mau sekali salin = 3 FOTO
-        BERBEDA (per toko), bukan 1 gambar gabungan — Windows clipboard
-        cuma muat 1 gambar per format, tapi bisa muat BANYAK FILE. Paste
-        di WA/Telegram/Explorer/dokumen mengeluarkan semua file sekaligus
-        (chat apps menampilkannya sebagai foto terpisah per toko).
-        Path absolut wajib; file yang tidak ada di-skip.
-
-        GlobalAlloc/GlobalLock/GlobalUnlock DIAMBIL dari kernel32 (ctypes),
-        BUKAN win32clipboard — module itu tidak punya atribut tersebut
-        (bug terverifikasi runtime 2026-09-17). Payload dari
-        make_hdrop_bytes(); roundtrip GetClipboardData(CF_HDROP) sudah
-        diverifikasi mengembalikan daftar path yang benar.
+    def copy_files(self, paths_json: str, caption: str | None = None) -> dict:
+        """Salin DAFTAR FILE ke clipboard sebagai CF_HDROP (file drop)
+        dan opsional caption teks sebagai CF_UNICODETEXT.
         """
         try:
             import ctypes
-
             import win32clipboard
             import win32con
             raw = json.loads(paths_json or "[]")
             paths = [str(p).strip() for p in raw if p and os.path.exists(p)]
-            if not paths:
-                return {"ok": False, "message": "tidak ada file screenshot yang valid"}
-            payload = make_hdrop_bytes(paths)
+            if not paths and not caption:
+                return {"ok": False, "message": "tidak ada file screenshot atau caption yang valid"}
+            
             GMEM_MOVEABLE, GMEM_DDESHARE = 0x0002, 0x2000
             kernel32 = ctypes.windll.kernel32
             kernel32.GlobalAlloc.restype = ctypes.c_void_p
@@ -291,20 +279,25 @@ class Api:
             kernel32.GlobalLock.restype = ctypes.c_void_p
             kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
             kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+
             win32clipboard.OpenClipboard()
             try:
                 win32clipboard.EmptyClipboard()
-                h = kernel32.GlobalAlloc(
-                    GMEM_MOVEABLE | GMEM_DDESHARE, len(payload)
-                )
-                if not h:
-                    return {"ok": False, "message": "GlobalAlloc gagal"}
-                ptr = kernel32.GlobalLock(h)
-                if not ptr:
-                    return {"ok": False, "message": "GlobalLock gagal"}
-                ctypes.memmove(ptr, payload, len(payload))
-                kernel32.GlobalUnlock(h)
-                win32clipboard.SetClipboardData(win32clipboard.CF_HDROP, h)
+                if paths:
+                    payload = make_hdrop_bytes(paths)
+                    h = kernel32.GlobalAlloc(
+                        GMEM_MOVEABLE | GMEM_DDESHARE, len(payload)
+                    )
+                    if not h:
+                        return {"ok": False, "message": "GlobalAlloc gagal"}
+                    ptr = kernel32.GlobalLock(h)
+                    if not ptr:
+                        return {"ok": False, "message": "GlobalLock gagal"}
+                    ctypes.memmove(ptr, payload, len(payload))
+                    kernel32.GlobalUnlock(h)
+                    win32clipboard.SetClipboardData(win32clipboard.CF_HDROP, h)
+                if caption:
+                    win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, str(caption))
             finally:
                 win32clipboard.CloseClipboard()
             return {"ok": True, "count": len(paths)}
@@ -593,13 +586,26 @@ class Api:
                 # (copy_files → CF_HDROP) — bukan digabung jadi 1 gambar.
                 # Paste di WA/Telegram → keluar 3 foto berbeda per toko.
                 if paths:
-                    res = self.copy_files(json.dumps(paths))
+                    toko_map = self._screenshot_toko.get(rk, {})
+                    store_names = []
+                    for p in paths:
+                        tname = toko_map.get(p)
+                        if not tname:
+                            filename = os.path.basename(p).lower()
+                            for s in Config.stores():
+                                sname = s.get("name", "")
+                                if sname and sname.lower().replace(" ", "_") in filename:
+                                    tname = sname
+                                    break
+                        if tname:
+                            store_names.append(tname)
+                    caption = bangun_teks_caption(store_names) if store_names else None
+                    res = self.copy_files(json.dumps(paths), caption=caption)
                     n = res.get("count", len(paths))
-                    msg = (
-                        f"📌 {n} screenshot tersalin sekaligus ke clipboard ({n} foto berbeda, per toko) — tinggal paste."
-                        if res.get("ok")
-                        else f"⚠ Gagal salin screenshot ke clipboard: {res.get('message')} — file tetap tersimpan di logs/screenshots/iklan/."
-                    )
+                    if res.get("ok"):
+                        msg = f"📌 {n} screenshot + teks caption tersalin. Paste ke WhatsApp." if caption else f"📌 {n} screenshot tersalin sekaligus ke clipboard ({n} foto berbeda, per toko) — tinggal paste."
+                    else:
+                        msg = f"⚠ Gagal salin screenshot ke clipboard: {res.get('message')} — file tetap tersimpan di logs/screenshots/iklan/."
                     self._global_log.append(msg)
                     self._push_js(f"appendLogLine({json.dumps(rk)}, {json.dumps(msg)})")
             # Kelompok A2: tool selesai (Finished ATAU Failed — bukan cuma

@@ -1,13 +1,9 @@
-# Python
+nul
+.DS_Store
 __pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-
-# Log & data output (screenshot, metrik, log aplikasi, riwayat sesi)
+*.pyc
+*.pyo
 logs/
-
-# Hasil scan & checkpoint (data rahasia warehouse, jangan di-commit)
-hasil_scan*.xlsx
-checkpoint_*.xlsxnul
+.impeccable/
+.agents/
+.opencode/

@@ -1,9 +1,52 @@
 # LAPORAN STRUKTUR, ALUR KERJA & PROGRES — BOPEL Automation Toolkit
 
-> Terakhir diupdate: 2026-11-03 (sesi: **Penghapusan mode Bulanan, Rename Scan Kecil -> Scan Kode Pesanan, Pengaman Salah-Mode, Tes Lulus**)
+> Terakhir diupdate: 2026-11-03 (sesi: **Recovery & Architectural Cleanup: `core/caption.py`, ModuleNotFoundError Fix, Startup Smoke Test**)
 > Riwayat detail per sesi digabung di bawah ini.
 
-## Session Report — 2026-11-03 (MVP 2 Hari: 2 Mode Inventory Scanner)
+## Session Report — 2026-11-03 (Recovery & Architectural Cleanup)
+
+### Ringkasan
+- Memperbaiki `ModuleNotFoundError: No module named 'screenshot_iklan'` pada `app.py` dengan memperbaiki arsitektur import (melarang `app.py` mengimport script tool di root).
+- Memindahkan fungsi helper caption ke `core/caption.py`. `app.py` dan `screenshot_iklan.py` kini sama-sama mengimpor `bangun_teks_caption` dari `core.caption`.
+- Memulihkan dan menyempurnakan `screenshot_iklan.py` beserta unit test & full-chain simulation test (`test_screenshot_iklan.py`, 37/37 tests PASS).
+- Memulihkan `test_fetch_state_timing.js` dan memverifikasi seluruh test suite Node & Python PASS (`PYTHONUTF8=1`).
+- Menjalankan startup smoke test (`import app` sukses via subprocess, `app.py` start dan berjalan stabil tanpa crash selama 10+ detik).
+
+### Perbaikan Arsitektur & Aturan
+- `app.py` (UI/bridge) dibersihkan dari import script tool root (`screenshot_iklan`, `shopee_fetch`, `scan`, `check`).
+- Shared helper `bangun_teks_caption` ditempatkan di `core/caption.py`.
+
+### Status Testing
+- Python test suites (`test_*.py`): Semua file PASS.
+- Py_compile: Semua file `.py` sukses.
+- Node check (`node --check web/app.js`): OK (exit 0).
+- Startup smoke test: `app.py` running stable.
+
+---
+
+## Session Report — 2026-11-03 (MVP 3: Screenshot Iklan & Bugfix)
+
+### Ringkasan
+- Memperbaiki bug `TypeError: _open_store_url() takes 4 positional arguments but 5 were given` di `screenshot_iklan.py` (signature `_open_store_url` belum disesuaikan untuk menerima parameter `used_hwnds` yang dikirim dari `_capture_store`).
+- Menambahkan **tes rantai penuh (full-chain simulation test)** di `test_screenshot_iklan.py` yang menjalankan `main()` untuk 3 toko palsu dengan mock batas terluar (`launch_url_in_profile`, `_chrome_windows`, `ensure_foreground`, `win32gui`, `pyautogui`, `ImageGrab`, `Config.stores`, dll.).
+- Menambahkan **tes tanda tangan murni (signature test)** menggunakan `inspect.signature` untuk memastikan parameter `used_hwnds` wajib ada pada `_open_store_url` dan mencegah regresi sejenis.
+- Memverifikasi seluruh 12 test suite PASS (37/37 tests untuk `test_screenshot_iklan.py`, 4/4 untuk `test_copy_image.py`, 13/13 untuk `test_chrome_launch.py`, serta seluruh test suite lainnya exit 0).
+- Py_compile semua file `.py` sukses, `node --check web/app.js` sukses (exit 0), dan `app.py` berhasil di-import.
+
+### Root Cause Bug `TypeError`
+- Pada penambahan pelacakan `used_hwnds` untuk mencegah window-hopping antar toko pada jalur utama, pemanggilan `_open_store_url(shortcut, name, akun, url, used_hwnds)` mengirimkan 5 argumen, namun definisi fungsi `_open_store_url` tertinggal 4 argumen. Selain itu, pengujian sebelumnya belum mencakup eksekusi rantai penuh `main()` sehingga lolos dari unit test.
+
+### File yang Diubah
+- `screenshot_iklan.py`: Sinkronisasi signature `_open_store_url` menerima `used_hwnds: set[int]`.
+- `test_screenshot_iklan.py`: Penambahan tes tanda tangan (`inspect.signature`) dan simulasi rantai penuh `main()` (jalur utama 3 toko & jalur fallback).
+- `LAPORAN_PROYEK.md`: Pencatatan sesi.
+
+### Status Testing
+- Semua 12 file test PASS (`PYTHONUTF8=1`).
+- Py_compile sukses.
+- Node check sukses.
+
+---
 
 ### Ringkasan
 - Menghapus mode Bulanan (`scan_bulanan.py`, `_test_bulanan_multiitem.py`, `_verify_c_bulanan.py`) sesuai permintaan MVP. Inventory Scanner kini hanya memiliki 2 mode: **Scan Kode Pesanan** (sebelumnya Scan Kecil) dan **Scan Detail**.
