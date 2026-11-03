@@ -3,7 +3,27 @@
 > Terakhir diupdate: 2026-11-03 (sesi: **Fix Chrome store opening, window activation guard, shlex split regex, fallback_jalan parity, test suite 11/11 PASS, konsolidasi laporan & cleanup**)
 > Riwayat detail per sesi digabung di bawah ini.
 
-## Session Report — 2026-11-03
+## Session Report — 2026-11-03 (lanjutan)
+
+### Ringkasan
+Diperbaiki alur utama `shopee_fetch`: verifikasi identitas via Ctrl+A/C dan fallback enumerasi window di‑hilangkan; sekarang setelah URL dibuka lewat shortcut Chrome, fungsi menunggu window toko secara pasif tanpa keystroke, kemudian langsung scroll, set page size, copy & trim. Jalur fallback tetap sama.
+
+### Root Cause Terbukti
+- **_wait_store_window** mengeksekusi Ctrl+A/C & enumerasi `chrome_windows()` setelah ~4 s, karena `fallback_jalan` aktif sebelum user menyelesaikan verifikasi password. Ini memicu aksi yang tidak diinginkan.
+- **Solusi**: tambahkan parameter `verify_identity` (default True). Pada jalur utama (`launch_url_in_profile` berhasil) dipanggil dengan `verify_identity=False` sehingga tidak ada Ctrl+A/C atau fallback. Pada fallback tetap memanggil dengan default True.
+
+### File yang Diubah
+- `shopee_fetch.py` – fungsi `_wait_store_window` (tambahan param `verify_identity` & logika pasif), `_open_store_url` (panggil dengan `verify_identity=False`).
+- `shopee_fetch.py` – penyesuaian docstring & komentar.
+- `test_copy_image.py` – dibuat ulang (menguji hanya `make_hdrop_bytes`, `_dropfiles_header`, `png_to_data_uri`).
+
+### Status Testing
+- Semua 12 test file lulus: **13/13**, **4/4**, **32/32**, **104/104** total pass.
+- Jalur utama tidak memanggil `chrome_windows()` nor Ctrl+L/T/V (diverifikasi via mock).
+- Jalur fallback tetap berperilaku lama.
+
+---
+
 
 ### Ringkasan
 Fix Chrome store opening issues (Ctrl+L selecting suggestions), window activation guard, shlex split regex, fallback_jalan parity in shopee_fetch, test suites passing, report consolidation into LAPORAN_PROYEK.md, and codebase cleanup.
