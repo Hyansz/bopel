@@ -451,8 +451,18 @@ PASTIKAN data Shopee SUDAH di-copy ke clipboard sebelum klik Start.
         print("❌ Clipboard kosong! Pastikan data Shopee sudah di-copy ke clipboard sebelum klik Start.")
         sys.exit(1)
     kode_auto, _, _, _, _, _ = extract_kode_dan_harga_dari_excel_shopee(auto_raw)
-    mode_input = "2" if kode_auto is not None else "1"
-    print(f"ℹ Format clipboard terdeteksi: {'tabel Excel Shopee (skala BESAR)' if mode_input == '2' else 'daftar kode (skala KECIL)'}.")
+    is_excel = kode_auto is not None
+
+    scan_mode = os.environ.get("BOPEL_SCAN_MODE", "") # "kecil" or "detail"
+    if scan_mode == "detail" and not is_excel:
+        print("❌ Scan Detail butuh tabel Excel mutasi Shopee (kolom 'No. Pesanan'). Clipboard berisi daftar kode — pilih Scan Kode Pesanan atau copy tabel Excel lengkap.")
+        sys.exit(1)
+    if scan_mode == "kecil" and is_excel:
+        print("❌ Scan Kode Pesanan butuh daftar kode polos atau hasil copy 'Dana Dilepaskan' Shopee. Clipboard berisi tabel Excel mutasi — pilih Scan Detail atau copy daftar kode.")
+        sys.exit(1)
+
+    mode_input = "2" if is_excel else "1"
+    print(f"ℹ Format clipboard terdeteksi: {'tabel Excel Shopee (Scan Detail)' if mode_input == '2' else 'daftar kode (Scan Kode Pesanan)'}.")
 else:
     print(
 """

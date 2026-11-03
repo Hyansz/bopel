@@ -1,24 +1,27 @@
 # LAPORAN STRUKTUR, ALUR KERJA & PROGRES — BOPEL Automation Toolkit
 
-> Terakhir diupdate: 2026-11-03 (sesi: **Penghapusan UI Textual lama, update AGENTS.md, E2E Screenshot Iklan & Fetch Lolos dikonfirmasi user**)
+> Terakhir diupdate: 2026-11-03 (sesi: **Penghapusan mode Bulanan, Rename Scan Kecil -> Scan Kode Pesanan, Pengaman Salah-Mode, Tes Lulus**)
 > Riwayat detail per sesi digabung di bawah ini.
 
-## Session Report — 2026-11-03 (Final Phase)
+## Session Report — 2026-11-03 (MVP 2 Hari: 2 Mode Inventory Scanner)
 
 ### Ringkasan
-Penghapusan total UI Textual lama (`main.py`, folder `ui/`, `start_tui.bat`, dan `mcp/bopel_ui_tester`) setelah migrasi penuh ke pywebview + SPA (`app.py` + `web/`). E2E nyata untuk Screenshot Iklan dan Fetch telah dikonfirmasi user **LOLOS** (tidak ada tab `7"`, tidak pindah profil).
+- Menghapus mode Bulanan (`scan_bulanan.py`, `_test_bulanan_multiitem.py`, `_verify_c_bulanan.py`) sesuai permintaan MVP. Inventory Scanner kini hanya memiliki 2 mode: **Scan Kode Pesanan** (sebelumnya Scan Kecil) dan **Scan Detail**.
+- Merename "Scan Kecil" menjadi "Scan Kode Pesanan" di `config.yaml` dan dokumentasi.
+- Menambahkan **pengaman salah-mode** di `scan.py` (via env var `BOPEL_SCAN_MODE` dari `app.py` / `ToolLauncher`):
+  - Mode **Scan Detail** tetapi clipboard TIDAK berisi tabel Excel mutasi Shopee (kolom 'No. Pesanan') → berhenti (`exit 1`) dengan pesan panduan.
+  - Mode **Scan Kode Pesanan** tetapi clipboard berisi tabel Excel mutasi → berhenti (`exit 1`) dengan pesan panduan.
+- Memperbarui unit test (`test_retur_scan.py`, `test_resume_flag.py`, `test_notfound_tanggal.py`, `test_tanggal_pelunasan.py`) agar menargetkan `scan.py` semata tanpa ketergantungan pada `scan_bulanan.py`.
+- **File Data Bulanan User**: File `hasil_scan_bulanan.xlsx` (24.198 bytes), `hasil_scan_bulanan_1.xlsx` (29.363 bytes), dan `checkpoint_scan_bulanan.xlsx` (6.299 bytes) **TIDAK dihapus** (tetap utuh di disk). User dapat memutuskan apakah ingin menghapusnya nanti atau mempertahankannya sebagai arsip.
 
-### Root Cause Terbukti
-- **Fallback `_wait_store_window`** yang aktif terlalu cepat (>4s) memicu enumerasi `chrome_windows()` dan verifikasi identitas `Ctrl+A/C` pada jalur utama, menyebabkan window switching dan keystroke tidak terduga saat user mengisi password popup.
-- **Solusi**: parameter `verify_identity=False` pada jalur utama (`launch_url_in_profile`) membuat proses menunggu window secara pasif tanpa keystroke.
-
-### File yang Diubah / Dihapus
-- **Dihapus**: `main.py`, folder `ui/`, `start_tui.bat`, folder `mcp/bopel_ui_tester`, `test_copy_image.py` (dibuat ulang versi murni helper).
-- **Diubah**: `shopee_fetch.py`, `test_copy_image.py`, `requirements.txt` (hapus `textual` & `rich`), `AGENTS.md`, `LAPORAN_PROYEK.md`.
+### File yang Dihapus / Diubah
+- **Dihapus**: `scan_bulanan.py`, `_test_bulanan_multiitem.py`, `_verify_c_bulanan.py`.
+- **Diubah**: `config.yaml`, `scan.py`, `core/launcher.py`, `app.py`, `web/app.js`, `test_retur_scan.py` (dulu `test_retur_bulanan.py`), `test_resume_flag.py`, `test_notfound_tanggal.py`, `test_tanggal_pelunasan.py`, `docs/CONFIG_SCHEMA.md`, `LAPORAN_PROYEK.md`.
 
 ### Status Testing
-- Semua 12 test file lulus: **13/13**, **4/4**, **32/32**, **104/104** total pass.
-- E2E nyata Screenshot Iklan & Fetch: **LOLOS** (dikonfirmasi user).
+- Semua 12 test file lulus: **13/13**, **4/4**, **32/32**, dll. Total pass.
+- Py compile semua `.py` sukses tanpa error.
+- `node --check web/app.js` sukses.
 
 ---
 
@@ -38,7 +41,7 @@ C:\robot\bopel\
 │
 ├── core/                      # Modul inti — UI-agnostic, dipakai app.py maupun tool
 │   ├── config.py              # Config singleton + validasi config.yaml (ConfigError)
-│   ├── launcher.py            # ToolLauncher/ToolRunner: subprocess hidden, reader thread, stop/kill
+│   ├── launcher.py            # ToolLauncher/ToolRunner: subprocess hidden, reader thread, stop/kill, extra_env
 │   ├── logger.py              # AppLogger: rotating log → logs/app.log
 │   ├── observ.py              # Screenshot kegagalan (budget 5/run), metrik, tunggu_grid_respon
 │   ├── parsing.py             # Parsing MURNI clipboard grid + deteksi/catatan retur Shopee
@@ -54,8 +57,7 @@ C:\robot\bopel\
 │
 ├── Tool otomatisasi (root, dijalankan sebagai subprocess):
 │   ├── check.py               # Checklist pesanan + validasi harga Shopee vs app
-│   ├── scan.py                # Scan status pembayaran/faktur + validasi Excel (2 mode auto-detect)
-│   ├── scan_bulanan.py        # Varian bulanan (klon scan.py + delta header/checkpoint/output)
+│   ├── scan.py                # Scan status pembayaran/faktur + validasi Excel (2 mode: Scan Kode Pesanan & Scan Detail)
 │   ├── shopee_fetch.py        # Auto-fetch income Shopee via Playwright + Chrome profile toko
 │   ├── screenshot_iklan.py    # Screenshot chart dashboard iklan per toko & rentang tanggal
 │   ├── calibrate_chart_crop.py# Tool sekali-pakai kalibrasi crop chart (tidak di config.yaml)
@@ -71,7 +73,6 @@ C:\robot\bopel\
 │   ├── metrics.json           # 1 baris JSON per run (metrik)
 │   ├── .active_store.json     # State toko + rentang tanggal terakhir
 │   ├── screenshots/           # Screenshot observability + hasil Screenshot Iklan
-│   ├── validasi_bulanan/      # Bukti hasil validasi mode Bulanan
 │   └── historical_backup/     # Backup output lama (tidak disentuh)
 │
 ├── hooks/                     # Plugin hooks (ponytail)
@@ -91,7 +92,7 @@ C:\robot\bopel\
 
 ### 2.2 Alur Tool Utama
 - **`check.py`**: Checklist pesanan + validasi harga Shopee vs app.
-- **`scan.py` & `scan_bulanan.py`**: Inventory scanner (2 mode auto-detect) dengan checkpoint resume opt-in (`--resume`).
+- **`scan.py`**: Inventory scanner (2 mode: **Scan Kode Pesanan** & **Scan Detail**) dengan checkpoint resume opt-in (`--resume`) dan pengaman salah-mode clipboard.
 - **`shopee_fetch.py`**: Auto-fetch income Shopee via Chrome profile toko (0 `.fill()` / `.type()`, read-only login polling, passive window wait pada jalur utama, trim tabel income).
 - **`screenshot_iklan.py`**: Screenshot chart dashboard iklan per toko & rentang tanggal (direct Chrome profile launch via `.lnk` parsing + fallback keystroke + foreground validation).
 
@@ -106,7 +107,7 @@ C:\robot\bopel\
 | `test_gabungkan_baris_terpecah.py` | PASS (exit 0) |
 | `test_notfound_tanggal.py` | PASS (exit 0) |
 | `test_resume_flag.py` | PASS (exit 0) |
-| `test_retur_bulanan.py` | PASS (exit 0) |
+| `test_retur_scan.py` | PASS (exit 0) |
 | `test_scan_parse.py` | PASS (exit 0) |
 | `test_screenshot_iklan.py` | 32/32 PASS |
 | `test_shopee_fetch.py` | PASS (exit 0) |
@@ -118,28 +119,19 @@ C:\robot\bopel\
 
 ## 4. RIWAYAT SESI & ROOT CAUSE PENTING (2026-08 s/d 2026-11)
 
-### Sesi 2026-11-03 — Penghapusan Textual & E2E Lolos
-- **Pekerjaan**: Penghapusan total UI Textual lama (`main.py`, `ui/`, `start_tui.bat`, `mcp/bopel_ui_tester`). E2E nyata Screenshot Iklan & Fetch dikonfirmasi user **LOLOS** (tidak ada tab `7"`, tidak pindah profil).
-- **Fix Fetch**: Menambahkan parameter `verify_identity=False` pada jalur utama `_wait_store_window` agar tidak memicu fallback enumerasi window atau Ctrl+A/C saat user mengisi password popup.
+### Sesi 2026-11-03 (MVP 2 Hari) — Hapus Mode Bulanan & Pengaman Salah-Mode
+- **Pekerjaan**: Menghapus mode Bulanan (`scan_bulanan.py`, tes terkait), merename "Scan Kecil" menjadi "Scan Kode Pesanan", menambahkan pengaman salah-mode berbasis `BOPEL_SCAN_MODE` di `scan.py` & `launcher.py`, dan memperbarui seluruh unit test.
+- **File Data Bulanan**: Mempertahankan file `hasil_scan_bulanan*.xlsx` & `checkpoint_scan_bulanan.xlsx` di disk untuk keputusan user.
 
-### Sesi 2026-11-02 — Retur `scan_bulanan.py`
-- Porting deteksi retur Excel income ke `scan_bulanan.py` sehingga retur tanpa faktur tercatat `RETUR`, bukan `TIDAK ADA FAKTUR`.
+### Sesi 2026-11-03 (Sesi Sebelumnya) — Penghapusan Textual & E2E Lolos
+- Penghapusan total UI Textual lama (`main.py`, `ui/`, `start_tui.bat`, `mcp/bopel_ui_tester`). E2E nyata Screenshot Iklan & Fetch dikonfirmasi user **LOLOS**.
 
-### Sesi 2026-10-03 — Resume Opt-in & NameError Fix
-- Pindah deklarasi map ke atas blok checkpoint; resume jadi `--resume` (opt-in).
-
-### Sesi 2026-09-12 — Fix NOT FOUND Palsu & Newline Literal
-- Penanganan newline internal dalam sel grid via `core/parsing.gabungkan_baris_terpecah()`.
-
-### Sesi 2026-08-19 — Auto-Fetch Shopee & Profile Lock
-- Otomasi Chrome profile toko dengan penanganan lockfile dan WM_CLOSE graceful.
-
-### Sesi 2026-08-13 — Keamanan Clipboard & Fail-safe
-- 3 lapis pengaman `core/validasi.py` untuk mencegah clipboard tak valid diketik ke aplikasi produksi.
+### Sesi 2026-11-02 — Retur `scan.py`
+- Porting deteksi retur Excel income ke `scan.py` sehingga retur tanpa faktur tercatat `RETUR`, bukan `TIDAK ADA FAKTUR`.
 
 ---
 
 ## 5. KNOWN ISSUES & CATATAN PENTING
 
 1. **Tab baru Chrome**: Setiap kali `Start` dijalankan untuk tool toko, Chrome membuka tab baru (tab Shopee/iklan menumpuk). Belum ditangani penutupan tab otomatis.
-2. **`scan_bulanan.py`**: File ada di disk dan terdaftar di `config.yaml` (mode Bulanan aktif).
+2. **File Data Bulanan**: `hasil_scan_bulanan.xlsx`, `hasil_scan_bulanan_1.xlsx`, dan `checkpoint_scan_bulanan.xlsx` tetap tersimpan di root proyek sebagai arsip/data historis user.

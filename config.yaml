@@ -28,22 +28,13 @@ tools:
     script: scan.py
     description: Scan status pembayaran dan validasi Excel
     target_window_title: Inventorycabang
-    # Kelompok D — 3 mode eksekusi (Opsi B): 1 tool, beberapa tombol.
-    # Mode 1 & 2 tetap AUTO-DETECT dari isi clipboard (keputusan user
-    # 2026-08-15): scan.py pilih mode kecil/besar sendiri dari format
-    # clipboard (tabel Excel 'No. Pesanan' = besar, kode polos = kecil).
-    # Beda tombol = panduan data yang diharapkan. Mode 3 (Scan Bulanan)
-    # pakai script terpisah scan_bulanan.py (restore dari git history +
-    # disinkronkan dengan scan.py; output hasil_scan_bulanan.xlsx).
-    # script di mode opsional — kosong = pakai script tool induk (scan.py).
+    # 2 mode eksekusi: 1 tool, beberapa tombol.
+    # Auto-detect dari format clipboard (tabel Excel 'No. Pesanan' = besar/detail, kode polos = kecil/kode pesanan).
     modes:
-      - name: Scan Kecil
+      - name: Scan Kode Pesanan
         description: Data detail, jumlah sedikit — clipboard berisi daftar kode polos atau hasil copy Dana Dilepaskan Shopee (kode + harga otomatis untuk validasi)
       - name: Scan Detail
-        description: Data agak banyak + detail periode tertentu — clipboard berisi tabel Excel Shopee
-      - name: Scan Bulanan
-        description: Data periode 1 bulan atau lebih — clipboard berisi tabel Excel Shopee
-        script: scan_bulanan.py
+        description: Data agak banyak + detail periode tertentu — clipboard berisi tabel Excel mutasi Shopee (kolom 'No. Pesanan')
 
 # Toko Shopee yang bisa dijadikan sumber Auto-Fetch (selector di UI).
 # Pola mirip tools[].modes: nambah toko baru = edit config saja.

@@ -67,6 +67,7 @@ class ToolLauncher:
         on_output: OnOutput | None = None,
         on_started: OnStarted | None = None,
         on_finished: OnFinished | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> bool:
         """Launch a tool script as a subprocess.
 
@@ -113,6 +114,8 @@ class ToolLauncher:
         # bikin UnicodeEncodeError CRASH pas dijalankan dari UI. PYTHONUTF8=1
         # memaksa UTF-8 buat stdout/stderr pipe.
         env["PYTHONUTF8"] = "1"
+        if extra_env:
+            env.update(extra_env)
 
         # Create subprocess with piped stdout+stderr
         try:

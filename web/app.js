@@ -137,7 +137,7 @@ function toolStateOf(script) {
 }
 
 /* Kelompok D — run key unik per (tool, mode): script yang sama bisa
-   dipakai beberapa mode (scan.py = Scan Kecil & Scan Detail), jadi
+   dipakai beberapa mode (scan.py = Scan Kode Pesanan & Scan Detail), jadi
    key-nya bukan cuma nama script. Python meng-echo key ini di semua
    push JS (start_tool(script, run_key)). */
 function runKey(script, modeName) {
