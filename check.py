@@ -1,10 +1,13 @@
 import time
+import os
 import pyautogui
 import pyperclip
 import re
 import sys
 from collections import deque
 
+from core import validasi
+from core import window
 from core.observ import (
     ambil_screenshot,
     cetak_ringkasan,
@@ -14,6 +17,17 @@ from core.observ import (
 # =============================
 # CONFIG
 # =============================
+# Mode UI (dijalankan dari BopelApp via launcher): semua prompt input()
+# yang gak bisa dijawab dari terminal Textual di-skip / auto-continue,
+# window warehouse di-aktivasi otomatis (core/window.py).
+UI_MODE = os.environ.get("BOPEL_UI_MODE") == "1"
+SCRIPT_NAME = os.path.basename(__file__)
+
+# Grace delay baca clipboard di mode UI: user copy data Shopee DULU, lalu
+# klik Start; clipboard dibaca otomatis N detik setelah Start (tanpa
+# prompt 'Copy data -> ENTER').
+GRACE_PASTE_DATA = 5
+
 DELAY = 0.25      # diperbesar
 FAST = 0.12
 MAX_LOOP = 500
@@ -277,16 +291,44 @@ print("=" * 50)
 # =============================
 # STEP 1 - AMBIL DATA SHOPEE
 # =============================
-input("\nSTEP 1:\nCopy data Shopee → ENTER...\n")
+if UI_MODE:
+    print(
+        "\nSTEP 1:\n"
+        "Pastikan data Shopee SUDAH di-copy ke clipboard sebelum klik Start.\n"
+        f"Clipboard akan dibaca otomatis dalam {GRACE_PASTE_DATA} detik..."
+    )
+    time.sleep(GRACE_PASTE_DATA)
+else:
+    input("\nSTEP 1:\nCopy data Shopee → ENTER...\n")
 
 raw = pyperclip.paste()
 
+# VALIDASI WAJIB (SEBELUM data dipakai): clipboard yang berisi teks
+# bebas/prompt (bukan data pesanan) HARUS ditolak di sini, bukan
+# diam-diam dipakai. Fail-safe: kosong / terlalu banyak baris / tidak
+# ada satupun kode pesanan yang match pola -> STOP.
 if not raw.strip():
-    print("❌ Clipboard kosong!")
-    sys.exit()
+    print("❌ Clipboard kosong! Copy data pesanan dulu, lalu klik Start lagi.")
+    sys.exit(1)
+
+if len(raw.splitlines()) > validasi.MAX_BARIS_KODE:
+    print(
+        f"❌ Format clipboard tidak dikenali sebagai data pesanan: "
+        f"terlalu banyak baris (>{validasi.MAX_BARIS_KODE}).\n"
+        "   Cek ulang copy Anda — jangan copy teks bebas/prompt ke clipboard."
+    )
+    sys.exit(1)
 
 orders = CODE_PATTERN.findall(raw)
 orders = list(dict.fromkeys(orders))
+
+if not orders:
+    print(
+        "\n❌ Format clipboard tidak dikenali sebagai data pesanan, cek ulang copy Anda.\n"
+        "   Tidak ada kode pesanan yang match pola Shopee ('26' + 12-13 huruf/angka, mis. 2608113PS5JD38).\n"
+        "   Copy data pesanan dari Shopee dulu, lalu klik Start lagi."
+    )
+    sys.exit(1)
 
 print("\nORDER TERBACA:")
 for o in orders:
@@ -296,10 +338,18 @@ print(f"\nTotal: {len(orders)}")
 
 if not orders:
     print("❌ Tidak ada data!")
-    sys.exit()
+    sys.exit(1)
 
-if input("\nLanjut scan + checklist? (y/n): ").lower() != "y":
-    sys.exit()
+if UI_MODE:
+    # Preview data SEBELUM bot menyentuh aplikasi: user sempat lihat
+    # & klik Stop kalau data yang terbaca salah.
+    validasi.preview_sebelum_mulai(orders)
+    print(f"⏳ Scan mulai dalam {GRACE_PASTE_DATA} detik — klik STOP sekarang kalau data di atas salah...")
+    time.sleep(GRACE_PASTE_DATA)
+    print("✔ Lanjut scan otomatis (mode UI).")
+else:
+    if input("\nLanjut scan + checklist? (y/n): ").lower() != "y":
+        sys.exit()
 
 # FIX BUG: hitung harga Shopee di sini, SEBELUM loop scan mulai. `raw` dan
 # `orders` udah lengkap dari STEP 1, jadi gak perlu nunggu scan aplikasi
@@ -317,17 +367,25 @@ pyperclip.copy("")
 # STEP 2
 # =============================
 print("\nSTEP 2:")
+# AUTO (mode UI): cari + aktifkan window warehouse dari config.yaml
+# (target_window_title). Kalau gak ketemu -> pesan error jelas + exit 1
+# (bukan crash; UI nampilin sebagai tool gagal). Di luar mode UI tetap
+# alt-tab manual seperti lama.
+window.persiapkan_window_target(SCRIPT_NAME, required=UI_MODE)
 print("Klik kolom MEMO (baris paling atas)")
 print("Cursor harus berkedip")
-input("ENTER jika siap...")
 
-print("\n⏳ Persiapan scan dimulai...")
-
-for i in range(5, 0, -1):
-    for j in range(4):
-        spin = spinner[j % len(spinner)]
-        print(f"{spin} Mulai dalam {i} detik...", end="\r")
-        time.sleep(0.25)
+if UI_MODE:
+    print(f"⏳ Window warehouse sudah dibawa ke depan — klik kolom MEMO dalam {GRACE_PASTE_DATA} detik...")
+    time.sleep(GRACE_PASTE_DATA)
+else:
+    input("ENTER jika siap...")
+    print("\n⏳ Persiapan scan dimulai...")
+    for i in range(5, 0, -1):
+        for j in range(4):
+            spin = spinner[j % len(spinner)]
+            print(f"{spin} Mulai dalam {i} detik...", end="\r")
+            time.sleep(0.25)
 
 print("🚀 MULAI SCAN!            \n")
 
@@ -634,8 +692,7 @@ print_price_table(orders, app_prices, shopee_prices)
 print("\nSUMMARY:")
 print(f"✔ Ketemu : {len(valid)} / {len(orders)}")
 print(f"✘ Tidak  : {len(invalid)}")
-if harga_beda:
-    print(f"≠ Beda   : {len(harga_beda)} (tidak di-checklist)")
+print(f"≠ Beda   : {len(harga_beda)} (tidak di-checklist)")
 
 if len(found) == len(orders):
     print("\nSEMUA VALID + CHECKLIST SELESAI ✅")
@@ -661,4 +718,8 @@ path_metrik = simpan_metrik("check.py", metrik)
 if path_metrik:
     print(f"  -> metrik tersimpan: {path_metrik}")
 
-input("\nENTER untuk keluar...")
+# Di mode UI, proses harus KELUAR sendiri (ToolFinished di UI nunggu
+# exit). "ENTER untuk keluar" cuma buat mode manual (jalan langsung dari
+# terminal, biar window CMD gak langsung nutup).
+if not UI_MODE:
+    input("\nENTER untuk keluar...")

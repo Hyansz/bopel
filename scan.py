@@ -1,22 +1,42 @@
 import time
+import os
 import re
+from datetime import datetime
 import pyautogui
 import pyperclip
 import sys
-import os
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill, Font
 
+from core import validasi
+from core import window
 from core.observ import (
     ambil_screenshot,
     cetak_ringkasan,
     simpan_metrik,
     tunggu_grid_respon,
 )
+from core.parsing import cari_baris_memo_terpecah, gabungkan_baris_terpecah
+from core.parsing import catatan_retur_shopee, deteksi_retur_shopee
 
 # =============================
 # CONFIG — SILAKAN TUNING DI SINI
 # =============================
+# Mode UI (dijalankan dari BopelApp via launcher): semua prompt input()
+# yang gak bisa dijawab dari terminal Textual di-skip / auto-continue,
+# window warehouse di-aktivasi otomatis (core/window.py).
+UI_MODE = os.environ.get("BOPEL_UI_MODE") == "1"
+SCRIPT_NAME = os.path.basename(__file__)
+
+# RESUME dari checkpoint = OPT-IN lewat flag CLI `--resume`
+# (python scan.py --resume). Tanpa flag = scan SELALU dari nol, checkpoint
+# lama diabaikan (ditimpa pas autosave pertama).
+RESUME = "--resume" in sys.argv
+
+# Grace delay baca clipboard di mode UI: user copy data Shopee DULU, lalu
+# klik Start; clipboard dibaca otomatis N detik setelah Start (tanpa
+# prompt 'Copy data -> ENTER').
+GRACE_PASTE_DATA = 5
 # pyautogui secara default punya jeda 0.1 detik di SETIAP pemanggilan
 # fungsi (hotkey/press/dll). Ini "pajak tersembunyi" yang paling besar
 # pengaruhnya kalau scan ratusan baris. Diturunkan ke 0.02.
@@ -98,18 +118,24 @@ DEBUG_NOTFOUND_LIMIT = 8   # batasi biar cmd gak kebanjiran pas SHOW_DETAIL_LOG 
 FOTO_AKTIF = True
 FOTO_RETRY_BATAS = 5
 
-# posisi kolom Price/Harga = 10 dari kiri (hitung mulai 1)
-# di Python index dimulai dari 0, jadi index-nya = posisi - 1
-PRICE_COLUMN_INDEX = 9
-
-# posisi kolom Retur = 12 dari kiri (hitung mulai 1) -> index 11
-RETUR_COLUMN_INDEX = 11
-
-# posisi kolom Tanggal = 3 dari kiri (hitung mulai 1) -> index 2
-TANGGAL_COLUMN_INDEX = 2
-
-# posisi kolom Salesman = 7 dari kiri (hitung mulai 1) -> index 6
-SALESMAN_COLUMN_INDEX = 6
+# SEMUA kolom grid aplikasi dicari DINAMIS dari NAMA di baris header hasil
+# copy (baris pertama yang ke-copy dari grid). Alasan: layout/urutan kolom
+# aplikasi BISA BERUBAH antar view/window — kasus nyata 2026-08-22: view
+# 'Browse Faktur Penjualan' punya susunan kolom beda dari view lama, jadi
+# index hardcode lama membaca kolom SALAH (harga kebaca 'Customer' ->
+# semua baris jadi SELISIH; status kebaca 'Bayar' -> semua kecatet Belum).
+# Nilai -1 = kolom tidak ada di grid ini -> kolom itu dianggap kosong.
+KOLOM_GRID = {
+    "Nomor": "nomor",              # No. Faktur (bukan kode pesanan)
+    "Tanggal": "tanggal",
+    "Memo": "memo",                # kode pesanan
+    "Salesman": "salesman",
+    "Customer": "customer",
+    "Total": "harga",
+    "Retur": "retur",
+    "Status_Bayar": "status",      # Sudah/Belum/paid/lunas
+    "TanggalPelunasan": "pelunasan",
+}
 
 # nama kolom "No. Pesanan" di file export Excel Shopee (mode skala besar).
 # dipakai buat cari otomatis index kolomnya dari baris header, jadi gak
@@ -122,6 +148,18 @@ SHOPEE_KODE_HEADER_NAME = "No. Pesanan"
 # (gak mulai dari kolom A), posisi huruf kolomnya bakal geser tapi nama
 # headernya tetap sama.
 SHOPEE_HARGA_HEADER_NAME = "Total Penghasilan"
+
+# nama kolom tanggal dilepas di export Excel Shopee (mode skala besar).
+# Dicari dari NAMA header juga (bukan hardcode posisi), isinya jadi
+# kolom TGL di hasil scan.
+SHOPEE_TANGGAL_HEADER_NAME = "Tanggal Dana Dilepaskan"
+
+# Kolom tambahan untuk deteksi RETUR (mode skala besar).
+# Nama header ini bisa bervariasi antar export; dicari secara LOOSE.
+SHOPEE_REFUND_HEADER_NAME = "Jumlah Pengembalian Dana Ke Pembeli"
+SHOPEE_HARGA_ASLI_HEADER_NAME = "Harga Asli Produk"
+SHOPEE_TANGGAL_PESANAN_HEADER_NAME = "Waktu Pesanan Dibuat"
+SHOPEE_TANGGAL_PESANAN_ALT = "Tanggal Pesanan Dibuat"
 
 CHECKPOINT_FILE = "checkpoint_scan.xlsx"
 CHECKPOINT_EVERY = 25   # autosave tiap 25 baris, biar aman kalau 800 baris macet di tengah
@@ -136,7 +174,7 @@ print(" INVENTORY PAYMENT CHECKER (OPTIMIZED) ")
 print("=" * 60)
 
 # =============================
-# RESUME DARI CHECKPOINT (kalau ada)
+# RESUME DARI CHECKPOINT (OPT-IN: flag CLI --resume)
 # =============================
 sudah = []
 belum = []
@@ -148,8 +186,34 @@ hasil_urut = []
 
 sudah_scan = set()
 
-if os.path.exists(CHECKPOINT_FILE):
-    if input(f"\nDitemukan checkpoint '{CHECKPOINT_FILE}'. Lanjutkan dari situ? (y/n): ").lower() == "y":
+# Map2 di bawah DIDEKLARASIKAN DI SINI (bukan di blok parse Shopee nanti)
+# karena blok checkpoint di bawah ini nulis hasil_urut duluan, sementara
+# map-nya baru diisi setelah data Shopee di-paste. Dulu baris 'Not Found'
+# di jalur checkpoint nge-access tanggal_dilepas_map sebelum ada ->
+# NameError: name 'tanggal_dilepas_map' is not defined.
+# Isi aslinya (hasil extract) tetap menimpa nilai kosong ini di bawah.
+
+# nomor -> harga versi Excel (dari kolom AG / 'Total Penghasilan'). Cuma
+# keisi kalau mode skala besar & kolomnya ketemu. Kosong = gak ada data
+# pembanding -> validasi harga otomatis "-" (di-skip) buat nomor itu.
+harga_excel_map = {}
+
+# nomor -> data retur dari Excel income Shopee (mode besar)
+refund_excel_map = {}
+harga_asli_excel_map = {}
+tanggal_pesanan_excel_map = {}
+
+# nomor -> 'Tanggal Dana Dilepaskan' Shopee (mode kecil: blok Dana
+# Dilepaskan; mode besar: kolom 'Tanggal Dana Dilepaskan' export Excel).
+# Isi kolom TGL di hasil scan; fallback = tanggal transaksi dari grid
+# aplikasi.
+tanggal_dilepas_map = {}
+
+if RESUME:
+    if not os.path.exists(CHECKPOINT_FILE):
+        print(f"\n⚠ --resume diberikan tapi checkpoint '{CHECKPOINT_FILE}' tidak ada -> scan dari nol.")
+    else:
+        print(f"\n→ Mode --resume: lanjut dari checkpoint '{CHECKPOINT_FILE}'.")
         wb_ck = load_workbook(CHECKPOINT_FILE)
         ws_ck = wb_ck.active
         for row in ws_ck.iter_rows(min_row=2, values_only=True):
@@ -157,9 +221,18 @@ if os.path.exists(CHECKPOINT_FILE):
             # ValidasiHarga & HargaExcel), format SEDANG (11 kolom),
             # format BARU (13 kolom: + JumlahDuplikatRow & CatatanMerge
             # buat gabung row duplikat), maupun format TERBARU (14 kolom:
-            # + JumlahCocokExcel buat notifikasi duplikasi tervalidasi).
-            if len(row) >= 14:
+            # + JumlahCocokExcel buat notifikasi duplikasi tervalidasi),
+            # dan format TERKINI (15 kolom: + TanggalPelunasanBeda), serta
+            # format TERKINI+ (16 kolom: + TanggalPelunasan asli, buat kolom
+            # REVISI pas status 'Tanggal Pelunasan Beda').
+            if len(row) >= 16:
+                nomor, no_faktur, salesman, customer, tanggal, memo, harga, retur, status, validasi, harga_excel_ck, jumlah_dupl_ck, catatan_ck, jumlah_cocok_ck, pelunasan_beda_ck, tgl_pelunasan_ck = row
+            elif len(row) >= 15:
+                nomor, no_faktur, salesman, customer, tanggal, memo, harga, retur, status, validasi, harga_excel_ck, jumlah_dupl_ck, catatan_ck, jumlah_cocok_ck, pelunasan_beda_ck = row
+                tgl_pelunasan_ck = ""
+            elif len(row) >= 14:
                 nomor, no_faktur, salesman, customer, tanggal, memo, harga, retur, status, validasi, harga_excel_ck, jumlah_dupl_ck, catatan_ck, jumlah_cocok_ck = row
+                pelunasan_beda_ck = False
             elif len(row) >= 13:
                 nomor, no_faktur, salesman, customer, tanggal, memo, harga, retur, status, validasi, harga_excel_ck, jumlah_dupl_ck, catatan_ck = row
                 jumlah_cocok_ck = 0
@@ -172,59 +245,45 @@ if os.path.exists(CHECKPOINT_FILE):
 
             sudah_scan.add(nomor)
             if status == "Sudah":
-                sudah.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "harga": harga, "retur": retur, "validasi": validasi, "harga_excel": harga_excel_ck, "jumlah_duplikat_row": jumlah_dupl_ck, "catatan_merge": catatan_ck or "", "jumlah_cocok_excel": jumlah_cocok_ck or 0})
-                hasil_urut.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "status": "Sudah", "validasi": validasi, "harga": harga, "harga_excel": harga_excel_ck, "retur": retur, "jumlah_duplikat_row": jumlah_dupl_ck, "catatan_merge": catatan_ck or "", "jumlah_cocok_excel": jumlah_cocok_ck or 0})
+                sudah.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "harga": harga, "retur": retur, "validasi": validasi, "harga_excel": harga_excel_ck, "jumlah_duplikat_row": jumlah_dupl_ck, "catatan_merge": catatan_ck or "", "jumlah_cocok_excel": jumlah_cocok_ck or 0, "tanggal_pelunasan_beda": bool(pelunasan_beda_ck), "tgl_pelunasan": tgl_pelunasan_ck or ""})
+                hasil_urut.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "status": "Sudah", "validasi": validasi, "harga": harga, "harga_excel": harga_excel_ck, "retur": retur, "jumlah_duplikat_row": jumlah_dupl_ck, "catatan_merge": catatan_ck or "", "jumlah_cocok_excel": jumlah_cocok_ck or 0, "tanggal_pelunasan_beda": bool(pelunasan_beda_ck), "tgl_pelunasan": tgl_pelunasan_ck or ""})
             elif status == "Belum":
-                belum.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "harga": harga, "retur": retur, "validasi": validasi, "harga_excel": harga_excel_ck, "jumlah_duplikat_row": jumlah_dupl_ck, "catatan_merge": catatan_ck or "", "jumlah_cocok_excel": jumlah_cocok_ck or 0})
-                hasil_urut.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "status": "Belum", "validasi": validasi, "harga": harga, "harga_excel": harga_excel_ck, "retur": retur, "jumlah_duplikat_row": jumlah_dupl_ck, "catatan_merge": catatan_ck or "", "jumlah_cocok_excel": jumlah_cocok_ck or 0})
+                belum.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "harga": harga, "retur": retur, "validasi": validasi, "harga_excel": harga_excel_ck, "jumlah_duplikat_row": jumlah_dupl_ck, "catatan_merge": catatan_ck or "", "jumlah_cocok_excel": jumlah_cocok_ck or 0, "tanggal_pelunasan_beda": bool(pelunasan_beda_ck), "tgl_pelunasan": tgl_pelunasan_ck or ""})
+                hasil_urut.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "status": "Belum", "validasi": validasi, "harga": harga, "harga_excel": harga_excel_ck, "retur": retur, "jumlah_duplikat_row": jumlah_dupl_ck, "catatan_merge": catatan_ck or "", "jumlah_cocok_excel": jumlah_cocok_ck or 0, "tanggal_pelunasan_beda": bool(pelunasan_beda_ck), "tgl_pelunasan": tgl_pelunasan_ck or ""})
             else:
                 not_found.append(nomor)
-                hasil_urut.append({"nomor": nomor, "no_faktur": "-", "salesman": "-", "customer": "-", "tanggal": "", "memo": "-", "status": "Not Found", "validasi": "-", "harga": "", "harga_excel": "", "jumlah_duplikat_row": 1, "catatan_merge": "", "jumlah_cocok_excel": 0})
+                # checkpoint lama tidak menyimpan tanggal utk baris Not
+                # Found -> tidak bisa direkonstruksi mundur. Pakai map
+                # tanggal_dilepas_map (sumber live) dengan fallback ke
+                # tanggal dari baris checkpoint ("" utk checkpoint lama).
+                hasil_urut.append({"nomor": nomor, "no_faktur": "-", "salesman": "-", "customer": "-", "tanggal": tanggal_dilepas_map.get(nomor, "") or tanggal, "memo": "-", "status": "Not Found", "validasi": "-", "harga": "", "harga_excel": "", "jumlah_duplikat_row": 1, "catatan_merge": "", "jumlah_cocok_excel": 0})
         print(f"-> Melanjutkan, {len(sudah_scan)} nomor sudah pernah di-scan.")
 
-# =============================
-# STEP 1 — PILIH MODE INPUT
-# =============================
-print(
-"""
-STEP 1
+def norm_tanggal(s):
+    """Parse string tanggal umum -> datetime.date | None.
+    Format dikenali: ISO (2026-08-20), m/d/yyyy (grid inventory),
+    d/m/yyyy (blok teks Shopee), dengan/tanpa jam. None = kosong atau
+    format tak dikenali."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y",
+                "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+    return None
 
-Pilih mode input:
-  1. Skala KECIL  -> paste daftar kode pesanan langsung (satu kode per baris)
-  2. Skala BESAR  -> paste mentahan hasil export Excel Shopee
-                      (banyak kolom, bot otomatis ambil kolom 'No. Pesanan')
-"""
-)
 
-mode_input = ""
-while mode_input not in ("1", "2"):
-    mode_input = input("Pilih 1 atau 2: ").strip()
-
-if mode_input == "1":
-    input(
-"""
-Copy daftar Nomor Faktur / kode pesanan
-(satu nomor per baris)
-
-ENTER...
-"""
-    )
-else:
-    input(
-"""
-Copy sel-sel hasil export Excel Shopee
-(boleh copy seluruh tabel apa adanya, termasuk baris
-'total(Rp)' dan header -> bot otomatis pilah sendiri)
-
-ENTER...
-"""
-    )
-
-raw = pyperclip.paste().strip()
-
-if not raw:
-    print("❌ Clipboard kosong!")
-    sys.exit()
+def tanggal_pelunasan_beda(tgl_dilepas, tgl_pelunasan):
+    """True = keduanya terisi & tanggalnya BEDA (anomali input tanggal).
+    False = sama. None = skip (ada yang kosong / tak terparse) -> jangan
+    flag. Perbandingan SETELAH normalisasi, bukan string equality."""
+    a, b = norm_tanggal(tgl_dilepas), norm_tanggal(tgl_pelunasan)
+    if a is None or b is None:
+        return None
+    return a != b
 
 
 def extract_kode_dan_harga_dari_excel_shopee(raw_text):
@@ -241,25 +300,31 @@ def extract_kode_dan_harga_dari_excel_shopee(raw_text):
     2. Dari baris header yang sama, sekalian cari index kolom
        SHOPEE_HARGA_HEADER_NAME ('Total Penghasilan' -> posisinya di
        kolom AG). Ini dipakai buat validasi harga: harga dari Excel
-       dibanding harga yang didapat bot pas scan di aplikasi.
+       dibanding harga yang didapat bot pas scan di aplikasi. Kolom
+       SHOPEE_TANGGAL_HEADER_NAME ('Tanggal Dana Dilepaskan') juga
+       diambil -> jadi isi kolom TGL di hasil scan.
     3. Untuk tiap baris SETELAH header, split by tab, ambil isi kode di
-       index kode, dan isi harga di index harga (kalau kolomnya ketemu).
-       Baris yang kodenya kosong (mis. pesanan batal/belum ada kode)
-       otomatis di-skip karena gak ada yang mau dicari.
+       index kode, dan isi harga/tanggal di indexnya masing-masing
+       (kalau kolomnya ketemu). Baris yang kodenya kosong (mis. pesanan
+       batal/belum ada kode) otomatis di-skip karena gak ada yang mau
+       dicari.
 
-    Return (None, None) kalau baris header 'No. Pesanan' gak ketemu sama
-    sekali (berarti bukan format yang diharapkan) -> caller bisa kasih
-    pesan error yang jelas ke user, bukan diam-diam salah parse.
+    Return (None, None, None) kalau baris header 'No. Pesanan' gak ketemu
+    sama sekali (berarti bukan format yang diharapkan) -> caller bisa
+    kasih pesan error yang jelas ke user, bukan diam-diam salah parse.
 
     Kalau kode ketemu tapi kolom harga ('Total Penghasilan') gak ketemu,
     tetap return kodenya, cuma harga_map-nya bakal kosong -> validasi
-    harga otomatis di-skip (bukan bikin program berhenti).
+    harga otomatis di-skip (bukan bikin program berhenti). Sama halnya
+    kalau kolom tanggal gak ketemu -> tanggal_map kosong (TGL fallback
+    ke tanggal grid aplikasi).
     """
     lines = raw_text.splitlines()
 
     header_row_idx = None
     kode_col_idx = None
     harga_col_idx = None
+    tanggal_col_idx = None
     for i, line in enumerate(lines):
         cols = [c.strip() for c in line.split("\t")]
         if SHOPEE_KODE_HEADER_NAME in cols:
@@ -267,13 +332,32 @@ def extract_kode_dan_harga_dari_excel_shopee(raw_text):
             kode_col_idx = cols.index(SHOPEE_KODE_HEADER_NAME)
             if SHOPEE_HARGA_HEADER_NAME in cols:
                 harga_col_idx = cols.index(SHOPEE_HARGA_HEADER_NAME)
+            if SHOPEE_TANGGAL_HEADER_NAME in cols:
+                tanggal_col_idx = cols.index(SHOPEE_TANGGAL_HEADER_NAME)
+
+            # Kolom retur (cari fleksibel — beberapa export pakai nama berbeda)
+            refund_col_idx = None
+            harga_asli_col_idx = None
+            tgl_pesan_col_idx = None
+            for c in cols:
+                cl = c.lower()
+                if refund_col_idx is None and "pengembalian" in cl and "pembeli" in cl:
+                    refund_col_idx = cols.index(c)
+                if harga_asli_col_idx is None and ("harga asli" in cl or "harga produk" in cl):
+                    harga_asli_col_idx = cols.index(c)
+                if tgl_pesan_col_idx is None and ("pesanan dibuat" in cl or "tanggal pesanan" in cl):
+                    tgl_pesan_col_idx = cols.index(c)
             break
 
     if header_row_idx is None:
-        return None, None
+        return None, None, None, None, None, None
 
     kodes = []
     harga_map = {}
+    tanggal_map = {}
+    refund_map = {}
+    harga_asli_map = {}
+    tanggal_pesan_map = {}
     for line in lines[header_row_idx + 1:]:
         if not line.strip():
             continue
@@ -284,26 +368,145 @@ def extract_kode_dan_harga_dari_excel_shopee(raw_text):
                 kodes.append(kode)
                 if harga_col_idx is not None and len(cols) > harga_col_idx:
                     harga_map[kode] = cols[harga_col_idx].strip()
+                if tanggal_col_idx is not None and len(cols) > tanggal_col_idx:
+                    tanggal_map[kode] = cols[tanggal_col_idx].strip()
+                if refund_col_idx is not None and len(cols) > refund_col_idx:
+                    refund_map[kode] = cols[refund_col_idx].strip()
+                if harga_asli_col_idx is not None and len(cols) > harga_asli_col_idx:
+                    harga_asli_map[kode] = cols[harga_asli_col_idx].strip()
+                if refund_col_idx is not None and len(cols) > refund_col_idx:
+                    refund_map[kode] = cols[refund_col_idx].strip()
+                if harga_asli_col_idx is not None and len(cols) > harga_asli_col_idx:
+                    harga_asli_map[kode] = cols[harga_asli_col_idx].strip()
+                if tgl_pesan_col_idx is not None and len(cols) > tgl_pesan_col_idx:
+                    tanggal_pesan_map[kode] = cols[tgl_pesan_col_idx].strip()
 
-    return kodes, harga_map
+    return kodes, harga_map, tanggal_map, refund_map, harga_asli_map, tanggal_pesan_map
 
 
-# nomor -> harga versi Excel (dari kolom AG / 'Total Penghasilan'). Cuma
-# keisi kalau mode skala besar & kolomnya ketemu. Kosong = gak ada data
-# pembanding -> validasi harga otomatis "-" (di-skip) buat nomor itu.
-harga_excel_map = {}
+def extract_kode_dan_harga_dari_daftar_shopee(raw_text):
+    """
+    Format baru scan kecil: copy halaman 'Dana Dilepaskan' Shopee
+    (teks polos, bukan tabel tab-separated). Struktur: 5 baris header
+    ('Pesanan', 'Tanggal Dana Dilepaskan', 'Status', 'Metode
+    Pembayaran', 'Total Penghasilan') diikuti blok 6 baris per
+    pesanan: kode, 'Pembeli:<nama>', tanggal, status, metode, harga
+    ('Rp39.550').
+
+    Return (kodes, harga_map, tanggal_map) — atau (None, None, None)
+    kalau header 'Total Penghasilan' gak ketemu (bukan format ini) ->
+    caller fallback ke daftar kode polos lama. tanggal_map = kolom
+    'Tanggal Dana Dilepaskan' (baris ke-3 tiap blok), dipakai sebagai
+    isi kolom TGL di hasil scan.
+    """
+    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+    try:
+        start = lines.index("Total Penghasilan") + 1
+    except ValueError:
+        return None, None, None
+
+    kodes = []
+    harga_map = {}
+    tanggal_map = {}
+    i = start
+    while i < len(lines):
+        kode = lines[i]
+        if re.fullmatch(r"26[A-Z0-9]{12,13}", kode):
+            kodes.append(kode)
+            if i + 5 < len(lines):
+                harga_map[kode] = lines[i + 5]
+            if i + 2 < len(lines):
+                tanggal_map[kode] = lines[i + 2]
+            i += 6
+        else:
+            i += 1  # baris tak dikenal -> lompat, cari blok kode berikutnya
+    return kodes, harga_map, tanggal_map
+
+
+# =============================
+# STEP 1 — PILIH MODE INPUT
+# =============================
+if UI_MODE:
+    print(
+"""
+STEP 1
+
+Mode UI — clipboard dibaca OTOMATIS (tanpa prompt ENTER):
+  - Isi clipboard = copy tabel Excel Shopee (ada kolom 'No. Pesanan')
+    -> mode skala BESAR otomatis.
+  - Isi clipboard = daftar kode polos (satu kode per baris) atau
+    hasil copy 'Dana Dilepaskan' Shopee (blok 6 baris per pesanan)
+    -> mode skala KECIL otomatis.
+
+PASTIKAN data Shopee SUDAH di-copy ke clipboard sebelum klik Start.
+"""
+    )
+    print(f"⏳ Membaca clipboard dalam {GRACE_PASTE_DATA} detik...")
+    time.sleep(GRACE_PASTE_DATA)
+    print("✔ Membaca clipboard...")
+
+    # Deteksi otomatis format: kalau ada header 'No. Pesanan' -> mode besar.
+    auto_raw = pyperclip.paste().strip()
+    if not auto_raw:
+        print("❌ Clipboard kosong! Pastikan data Shopee sudah di-copy ke clipboard sebelum klik Start.")
+        sys.exit(1)
+    kode_auto, _, _, _, _, _ = extract_kode_dan_harga_dari_excel_shopee(auto_raw)
+    mode_input = "2" if kode_auto is not None else "1"
+    print(f"ℹ Format clipboard terdeteksi: {'tabel Excel Shopee (skala BESAR)' if mode_input == '2' else 'daftar kode (skala KECIL)'}.")
+else:
+    print(
+"""
+STEP 1
+
+Pilih mode input:
+  1. Skala KECIL  -> paste daftar kode pesanan langsung (satu kode per baris)
+  2. Skala BESAR  -> paste mentahan hasil export Excel Shopee
+                      (banyak kolom, bot otomatis ambil kolom 'No. Pesanan')
+"""
+    )
+
+    mode_input = ""
+    while mode_input not in ("1", "2"):
+        mode_input = input("Pilih 1 atau 2: ").strip()
+
+    if mode_input == "1":
+        input(
+"""
+Copy daftar Nomor Faktur / kode pesanan
+(satu nomor per baris)
+
+ENTER...
+"""
+        )
+    else:
+        input(
+"""
+Copy sel-sel hasil export Excel Shopee
+(boleh copy seluruh tabel apa adanya, termasuk baris
+'total(Rp)' dan header -> bot otomatis pilah sendiri)
+
+ENTER...
+"""
+        )
+
+raw = pyperclip.paste().strip()
+
+if not raw:
+    print("❌ Clipboard kosong!")
+    sys.exit(1)
+
 
 if mode_input == "2":
-    kodes_hasil_extract, harga_map_hasil_extract = extract_kode_dan_harga_dari_excel_shopee(raw)
+    kodes_hasil_extract, harga_map_hasil_extract, tanggal_map_hasil_extract, refund_map_hx, harga_asli_map_hx, tgl_pesan_map_hx = extract_kode_dan_harga_dari_excel_shopee(raw)
 
     if kodes_hasil_extract is None:
         print(f"\n❌ Kolom '{SHOPEE_KODE_HEADER_NAME}' tidak ditemukan di data yang di-paste.")
         print("   Pastikan kamu copy termasuk baris header tabel Excel-nya (bukan cuma datanya doang).")
-        sys.exit()
+        sys.exit(1)
 
     if not kodes_hasil_extract:
         print(f"\n❌ Kolom '{SHOPEE_KODE_HEADER_NAME}' ketemu, tapi semua barisnya kosong / gak ada kodenya.")
-        sys.exit()
+        sys.exit(1)
 
     print(f"\n✔ Ketemu kolom '{SHOPEE_KODE_HEADER_NAME}', berhasil ambil {len(kodes_hasil_extract)} kode pesanan dari data Excel.")
 
@@ -313,13 +516,45 @@ if mode_input == "2":
     else:
         print(f"⚠ Kolom '{SHOPEE_HARGA_HEADER_NAME}' gak ketemu -> validasi harga di-skip, cuma kode pesanan aja yang dipakai buat scan.")
 
+    if tanggal_map_hasil_extract:
+        print(f"✔ Ketemu kolom '{SHOPEE_TANGGAL_HEADER_NAME}' -> TGL di hasil scan = tanggal dana dilepaskan.")
+        tanggal_dilepas_map = tanggal_map_hasil_extract
+
+    # map retur
+    if refund_map_hx:
+        refund_excel_map = refund_map_hx
+    if harga_asli_map_hx:
+        harga_asli_excel_map = harga_asli_map_hx
+    if tgl_pesan_map_hx:
+        tanggal_pesanan_excel_map = tgl_pesan_map_hx
+
     orders_raw = kodes_hasil_extract
 else:
-    orders_raw = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if line:
-            orders_raw.append(line)
+    kodes_baru, harga_baru, tanggal_baru = extract_kode_dan_harga_dari_daftar_shopee(raw)
+    if kodes_baru:
+        print(f"\n✔ Format daftar 'Dana Dilepaskan' Shopee terdeteksi — ambil {len(kodes_baru)} kode pesanan dari data.")
+        if harga_baru:
+            print("✔ Harga 'Total Penghasilan' ketemu -> harga dari Shopee akan divalidasi otomatis vs harga hasil scan aplikasi.")
+        else:
+            print("⚠ Harga gak ke-extract -> validasi harga di-skip, cuma kode pesanan aja yang dipakai buat scan.")
+        orders_raw = kodes_baru
+        harga_excel_map = harga_baru
+        tanggal_dilepas_map = tanggal_baru
+    else:
+        orders_raw = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if line:
+                orders_raw.append(line)
+
+# =============================
+# VALIDASI WAJIB (SEBELUM data dipakai / diketik ke aplikasi)
+# =============================
+# Fail-safe: SATU baris saja tidak match pola kode pesanan Shopee
+# (26 + 12-13 alfanumerik) -> SELURUH data ditolak + proses STOP.
+# Ini gerbang pertama — teks bebas/prompt yang nyasar ke clipboard
+# TIDAK akan pernah sampai ke kotak SEARCH aplikasi warehouse.
+validasi.validasi_daftar_kode(orders_raw, konteks=f"mode {mode_input}")
 
 # =============================
 # FILTER DUPLIKAT
@@ -348,20 +583,37 @@ print(f"\nTotal nomor unik tersisa untuk discan : {len(orders)}")
 if not orders:
     print("Semua nomor sudah pernah discan sebelumnya.")
 else:
-    if input("\nMulai Scan? (y/n): ").lower() != "y":
-        sys.exit()
+    if UI_MODE:
+        # Preview data SEBELUM bot menyentuh aplikasi: user sempat lihat
+        # & klik Stop kalau data yang terbaca salah.
+        validasi.preview_sebelum_mulai(orders)
+        print(f"⏳ Scan mulai dalam {GRACE_PASTE_DATA} detik — klik STOP sekarang kalau data di atas salah...")
+        time.sleep(GRACE_PASTE_DATA)
+        print("✔ Mulai scan otomatis (mode UI).")
+    else:
+        if input("\nMulai Scan? (y/n): ").lower() != "y":
+            sys.exit()
 
     # =============================
     # STEP 2
     # =============================
     print("\nSTEP 2")
-    print("Klik SEARCH NOMOR")
+    # AUTO (mode UI): cari + aktifkan window warehouse dari config.yaml
+    # (target_window_title). Kalau gak ketemu -> pesan error jelas + exit 1
+    # (bukan crash; UI nampilin sebagai tool gagal). Di luar mode UI tetap
+    # alt-tab manual seperti lama.
+    window.persiapkan_window_target(SCRIPT_NAME, required=UI_MODE)
+    print("Klik SEARCH NOMOR — window warehouse sudah dibawa ke depan otomatis")
     print("Cursor harus berkedip")
-    input("\nENTER jika siap...")
 
-    for i in range(5, 0, -1):
-        print(f"Mulai dalam {i}...", end="\r")
-        time.sleep(1)
+    if UI_MODE:
+        print(f"⏳ Mulai dalam {GRACE_PASTE_DATA} detik — klik kotak SEARCH sekarang...")
+        time.sleep(GRACE_PASTE_DATA)
+    else:
+        input("\nENTER jika siap...")
+        for i in range(5, 0, -1):
+            print(f"Mulai dalam {i}...", end="\r")
+            time.sleep(1)
 
     print("\n🚀 MULAI\n")
 
@@ -504,19 +756,17 @@ else:
         def cari_baris_memo(lines):
             if len(lines) < 2:
                 return None
-            # Cari index kolom 'Memo' dari header (baris pertama) biar gak
-            # hardcode posisi kalau urutan kolom beda-beda.
-            header_cols = lines[0].split('\t')
-            try:
-                memo_idx = header_cols.index('Memo')
-            except ValueError:
-                memo_idx = 4  # fallback posisi default kalau nama kolom beda
-
-            for line in lines[1:]:
-                cols = line.split('\t')
-                if len(cols) > memo_idx and cols[memo_idx].strip() == expected:
-                    if len(cols) >= 18:
-                        return cols
+            # Rekonstruksi baris grid yang terpecah karena ada NEWLINE
+            # literal di dalam sel (kasus nyata 2026-09-12: selalu
+            # NoPesanan berisi "XXXX\\nXXXX") — tanpa ini kode yang BENERAN
+            # ADA di grid dicap NOT FOUND (murni bug parsing clipboard).
+            # Logika murni ada di core/parsing.py (testable); di sini cuma
+            # nyambungin + catat metrik observability.
+            cols, n_gabung = cari_baris_memo_terpecah(lines, expected)
+            if n_gabung:
+                metrik["baris_terpecah"] += n_gabung
+            if cols is not None:
+                return cols
             return None
 
         def fase_baca():
@@ -524,6 +774,16 @@ else:
             cols != None berarti baris yang dicari KETEMU."""
             for attempt in range(HEADER_RETRY + 1):
                 lines, text = baca_clipboard()
+                if lines and kolom_idx["v"] is None:
+                    # Header ke-copy sekali aja cukup — isi kolomnya sama
+                    # sepanjang run. Kolom tak ketemu -> -1 (dianggap kosong).
+                    header_cols = lines[0].split('\t')
+                    kolom_idx["v"] = {}
+                    for nama, kunci in KOLOM_GRID.items():
+                        try:
+                            kolom_idx["v"][kunci] = header_cols.index(nama)
+                        except ValueError:
+                            kolom_idx["v"][kunci] = -1
                 cols = cari_baris_memo(lines)
                 if cols is not None:
                     return cols, lines, text
@@ -595,24 +855,29 @@ else:
 
             def proses_baca(lines):
                 """Tambah baris yang Memo-nya cocok ke `rows` (dedupe by
-                baris mentah -- 2 baris fisik yang isinya sama persis
-                tetap dihitung keduanya). Return True kalau baris match
-                TERAKHIR nempel di baris data terakhir blok ini (artinya
-                mungkin masih ada baris Memo sama di bawah yang belum
-                ke-visible)."""
+                baris HASIL REKONSTRUKSI (tab-joined) -- baris fisik mentah
+                sekarang bisa cuma separuh baris logis karena newline di sel).
+                Return True kalau baris match TERAKHIR nempel di baris data
+                terakhir blok ini (artinya mungkin masih ada baris Memo sama
+                di bawah yang belum ke-visible)."""
                 if len(lines) < 2:
                     return False
                 mi = memo_idx_dari(lines[0])
-                blok = lines[1:]
+                jumlah = len(lines[0].split('\t'))
+                rows_logis, n_gabung = gabungkan_baris_terpecah(lines[1:], jumlah)
+                if n_gabung:
+                    metrik["baris_terpecah"] += n_gabung
+                # Baris yang tak sampai lengkap (ujung clipboard) tetap ada di
+                # rows_logis sebagai baris terakhir — tidak dibuang senyap.
                 lanjut = False
-                for i, raw_line in enumerate(blok):
-                    if raw_line in seen:
+                for i, row in enumerate(rows_logis):
+                    key = '\t'.join(row)
+                    if key in seen:
                         continue
-                    cols = raw_line.split('\t')
-                    if len(cols) > mi and cols[mi].strip() == expected and len(cols) >= 18:
-                        seen.add(raw_line)
-                        rows.append(cols)
-                        if i == len(blok) - 1:
+                    if len(row) > mi and row[mi].strip() == expected and len(row) >= jumlah:
+                        seen.add(key)
+                        rows.append(row)
+                        if i == len(rows_logis) - 1:
                             lanjut = True
                 return lanjut
 
@@ -646,6 +911,9 @@ else:
             metrik["research"] += 1
             if FOTO_AKTIF:
                 ambil_screenshot(expected, "RE_SEARCH")
+            # SAFETY-NET: sebelum paste ulang ke kotak search, pastikan
+            # teksnya beneran kode pesanan. Abort proses kalau tidak.
+            expected = validasi.cegah_ketik_tidak_aman(expected, konteks="re-search")
             pyautogui.press("up")   # balik ke kotak search (sama seperti yang
                                     # dilakukan caller setelah satu baris selesai)
             time.sleep(DELAY_AFTER_UP)
@@ -730,12 +998,10 @@ else:
             return rows[0], 1, "", 0
 
         def harga_row(r):
-            if len(r) > PRICE_COLUMN_INDEX:
-                return to_number(r[PRICE_COLUMN_INDEX])
-            return 0
+            return to_number(ambil_kolom(r, "harga"))
 
         def status_sudah(r):
-            return len(r) > 17 and r[17].strip().lower().replace(" ", "") in ("sudah", "paid", "lunas")
+            return ambil_kolom(r, "status").lower().replace(" ", "") in ("sudah", "paid", "lunas")
 
         harga_excel = harga_excel_map.get(nomor, "")
         ada_excel = bool(harga_excel)
@@ -789,11 +1055,11 @@ else:
         wb = Workbook()
         ws = wb.active
         ws.title = "Checkpoint"
-        ws.append(["Nomor", "NoFaktur", "Salesman", "Customer", "Tanggal", "Memo", "Harga", "StatusRetur", "Status", "ValidasiHarga", "HargaExcel", "JumlahDuplikatRow", "CatatanMerge", "JumlahCocokExcel"])
+        ws.append(["Nomor", "NoFaktur", "Salesman", "Customer", "Tanggal", "Memo", "Harga", "StatusRetur", "Status", "ValidasiHarga", "HargaExcel", "JumlahDuplikatRow", "CatatanMerge", "JumlahCocokExcel", "TanggalPelunasanBeda", "TanggalPelunasan"])
         for x in sudah:
-            ws.append([x["nomor"], x["no_faktur"], x["salesman"], x["customer"], x["tanggal"], x["memo"], x["harga"], x["retur"], "Sudah", x.get("validasi", "-"), x.get("harga_excel", ""), x.get("jumlah_duplikat_row", 1), x.get("catatan_merge", ""), x.get("jumlah_cocok_excel", 0)])
+            ws.append([x["nomor"], x["no_faktur"], x["salesman"], x["customer"], x["tanggal"], x["memo"], x["harga"], x["retur"], "Sudah", x.get("validasi", "-"), x.get("harga_excel", ""), x.get("jumlah_duplikat_row", 1), x.get("catatan_merge", ""), x.get("jumlah_cocok_excel", 0), x.get("tanggal_pelunasan_beda", False), x.get("tgl_pelunasan", "")])
         for x in belum:
-            ws.append([x["nomor"], x["no_faktur"], x["salesman"], x["customer"], x["tanggal"], x["memo"], x["harga"], x["retur"], "Belum", x.get("validasi", "-"), x.get("harga_excel", ""), x.get("jumlah_duplikat_row", 1), x.get("catatan_merge", ""), x.get("jumlah_cocok_excel", 0)])
+            ws.append([x["nomor"], x["no_faktur"], x["salesman"], x["customer"], x["tanggal"], x["memo"], x["harga"], x["retur"], "Belum", x.get("validasi", "-"), x.get("harga_excel", ""), x.get("jumlah_duplikat_row", 1), x.get("catatan_merge", ""), x.get("jumlah_cocok_excel", 0), x.get("tanggal_pelunasan_beda", False), x.get("tgl_pelunasan", "")])
         for x in not_found:
             ws.append([x, "", "", "", "", "", "", "", "NotFound", "-", "", 1, "", 0])
 
@@ -813,8 +1079,15 @@ else:
         Nentuin 3 kolom terakhir di template report (KETERANGAN, STATUS,
         REVISI) berdasarkan hasil scan. Urutan prioritas cek dari yang
         paling 'parah' dulu:
-        1. Not found      -> gak ada datanya sama sekali di aplikasi
-        2. Retur          -> ketemu, tapi kolom Retur ke-deteksi
+        1. Retur          -> kolom Retur ke-detect ATAU baris income
+                             Shopee nandain refund. dicek DULU (sebelum
+                             not_found) karena retur bisa terjadi tanpa
+                             baris faktur di aplikasi — kasUS nyata
+                             260907DWRKTD19 (refund penuh, faktur sudah
+                             dihapus). Kalau dicek belakangan, baris itu
+                             salah jadi 'TIDAK ADA FAKTUR'.
+        2. Not found      -> gak ada datanya sama sekali di aplikasi
+                             DAN bukan retur
         3. Beda Nilai     -> ketemu, tapi harga Excel vs Aplikasi beda,
                              ATAU 1 kode muncul di >1 baris dengan harga
                              BEDA (bukan split faktur, harus dicek manual)
@@ -823,11 +1096,12 @@ else:
                              (termasuk yang baris duplikatnya berhasil
                              digabung jadi Sudah -> tercatat di REVISI)
         """
+        if item.get("retur") == "Retur":
+            catatan = item.get("catatan_merge", "")
+            return "RETUR", "CEK", catatan or "RETUR"
+
         if kind == "not_found":
             return "TIDAK ADA FAKTUR", "CEK", ""
-
-        if item.get("retur") == "Retur":
-            return "RETUR", "CEK", "RETUR"
 
         # NEW: 1 kode (Memo) muncul di >1 baris tapi harga beda antar
         # baris -> jangan digabung otomatis, tandai biar dicek manual.
@@ -852,7 +1126,7 @@ else:
 
         ws = wb.active
         ws.title = "Hasil"
-        ws.append(["SALES", "TGL", "KODE PESANAN", "NO. FAKTUR", "KETERANGAN", "STATUS", "REVISI"])
+        ws.append(["SALES", "TGL CAIR", "KODE PESANAN", "NO. FAKTUR", "KETERANGAN", "STATUS", "REVISI"])
 
         # Warna per KETERANGAN, niru style "Good/Bad/Neutral" bawaan
         # Excel biar kelihatan familiar. Fill = warna latar sel, Font =
@@ -864,6 +1138,7 @@ else:
             "BEDA NILAI":        (PatternFill("solid", fgColor="FFC7CE"), Font(color="9C0006")),  # merah
             "BELUM":             (PatternFill("solid", fgColor="FFEB9C"), Font(color="9C6500")),  # kuning
             "TIDAK ADA FAKTUR":  (PatternFill("solid", fgColor="D9D9D9"), Font(color="595959")),  # abu-abu
+            "Tanggal Pelunasan Beda": (PatternFill("solid", fgColor="DDEBF7"), Font(color="1F4E79")),  # biru muda
         }
 
         # Urutan penulisan di Excel = urutan asli hasil_urut, yaitu
@@ -877,6 +1152,18 @@ else:
         for r in hasil_urut:
             kind = kind_map.get(r["status"], "belum")
             keterangan, status_txt, revisi = tentukan_keterangan_status_revisi(kind, r)
+            # Anomali tanggal pelunasan: jadi KETERANGAN sendiri (bukan
+            # cuma timpa STATUS) supaya dapat warna baris sendiri juga.
+            # STATUS turun jadi CEK. REVISI diisi tanggal pelunasan dari
+            # grid inventory (ISO YYYY-MM-DD kalau terparse, teks mentah
+            # kalau tidak); catatan lain (DOUBLE FAKTUR dll) tetap
+            # digabung " | ".
+            if r.get("tanggal_pelunasan_beda"):
+                keterangan = "Tanggal Pelunasan Beda"
+                status_txt = "CEK"
+                d_p = norm_tanggal(r.get("tgl_pelunasan") or "")
+                tgl_revisi = d_p.isoformat() if d_p else (r.get("tgl_pelunasan") or "")
+                revisi = " | ".join(x for x in (revisi, tgl_revisi) if x)
 
             sales = r.get("customer") or "-"
             tgl = r.get("tanggal") or ""
@@ -911,10 +1198,18 @@ else:
         # sheet Rekap Total Harga
         ws3 = wb.create_sheet("Rekap Harga")
         all_items = sudah + belum
-        rekap_total_aplikasi = sum(to_number(x["harga"]) for x in all_items)
-        rekap_total_excel = sum(to_number(x.get("harga_excel", "")) for x in all_items if x.get("harga_excel"))
-        rekap_total_ok = sum(to_number(x["harga"]) for x in all_items if x.get("validasi") == "OK")
-        rekap_total_selisih = sum(to_number(x["harga"]) for x in all_items if x.get("validasi") == "SELISIH")
+        # CEK MANUAL (multi-item genuin / harga beda antar baris) TIDAK ikut
+        # total utama: harga yang dipakai = harga baris pertama (belum tentu
+        # benar — mis. item multi harga 50rb padahal total order 200rb).
+        # Dipisah + di-flag, supaya angka SELISIH/total tidak menyesatkan.
+        cek_manual_items = [x for x in all_items if x.get("catatan_merge", "").startswith("CEK MANUAL")]
+        verified_items = [x for x in all_items if not x.get("catatan_merge", "").startswith("CEK MANUAL")]
+        rekap_total_aplikasi = sum(to_number(x["harga"]) for x in verified_items)
+        rekap_total_excel = sum(to_number(x.get("harga_excel", "")) for x in verified_items if x.get("harga_excel"))
+        rekap_total_ok = sum(to_number(x["harga"]) for x in verified_items if x.get("validasi") == "OK")
+        rekap_total_selisih = sum(to_number(x["harga"]) for x in verified_items if x.get("validasi") == "SELISIH")
+        rekap_cek_count = len(cek_manual_items)
+        rekap_cek_excel = sum(to_number(x.get("harga_excel", "")) for x in cek_manual_items if x.get("harga_excel"))
 
         ws3.append(["REKAP TOTAL HARGA", ""])
         ws3.append(["", ""])
@@ -928,23 +1223,30 @@ else:
         ws3.append(["Sudah Bayar", len(sudah)])
         ws3.append(["Belum Bayar", len(belum)])
         ws3.append(["Not Found", len(not_found)])
-        ws3.append(["Status OK", sum(1 for x in all_items if x.get("validasi") == "OK")])
-        ws3.append(["Status SELISIH", sum(1 for x in all_items if x.get("validasi") == "SELISIH")])
+        ws3.append(["Status OK", sum(1 for x in verified_items if x.get("validasi") == "OK")])
+        ws3.append(["Status SELISIH", sum(1 for x in verified_items if x.get("validasi") == "SELISIH")])
         ws3.append(["Double Faktur (duplikat row digabung)", sum(1 for x in all_items if x.get("jumlah_duplikat_row", 1) > 1)])
         ws3.append(["Duplikasi Tervalidasi (>1 row cocok harga Excel)", sum(1 for x in all_items if "TERDETEKSI DATA DUPLIKASI" in x.get("catatan_merge", ""))])
+        if cek_manual_items:
+            # Blok terpisah: item yang butuh verifikasi manual TIDAK masuk
+            # total utama (harga-nya belum pasti). Nilai Excel = acuan
+            # berapa yang seharusnya, biar user tahu ukurannya.
+            ws3.append(["", ""])
+            ws3.append(["CEK MANUAL (belum terverifikasi — TIDAK termasuk total di atas)", ""])
+            ws3.append(["Jumlah Item CEK MANUAL", rekap_cek_count])
+            ws3.append(["Nilai acuan per Excel (cek manual)", rekap_cek_excel if rekap_cek_excel else "tanpa data harga Excel"])
+            ws3.cell(row=ws3.max_row - 2, column=1).font = Font(bold=True, color="9C0006")
 
         # format header rekap
         ws3["A1"].font = Font(bold=True, size=14)
         ws3["A3"].font = Font(bold=True)
         ws3["B3"].font = Font(bold=True)
         ws3["A9"].font = Font(bold=True)
-        for row in ws3.iter_rows(min_row=4, max_row=7, min_col=1, max_col=2):
+        # format angka kolom B untuk SEMUA baris numerik (bukan range
+        # hardcode — jumlah baris berubah kalau ada blok CEK MANUAL)
+        for row in ws3.iter_rows(min_row=4, max_row=ws3.max_row, min_col=1, max_col=2):
             for cell in row:
-                if cell.column == 2:
-                    cell.number_format = '#,##0'
-        for row in ws3.iter_rows(min_row=15, max_row=16, min_col=1, max_col=2):
-            for cell in row:
-                if cell.column == 2:
+                if cell.column == 2 and isinstance(cell.value, int):
                     cell.number_format = '#,##0'
         ws3.column_dimensions["A"].width = 30
         ws3.column_dimensions["B"].width = 20
@@ -1016,7 +1318,7 @@ else:
         rows = []
         for i, x in enumerate(data, 1):
             no_faktur = x.get("no_faktur") or "-"
-            kode = x["memo"] if x["memo"] else "-"
+            kode = x["nomor"]
             customer = x.get("customer") or "-"
             salesman = x.get("salesman") or "-"
             status_text = status_label.get(x["status"], x["status"])
@@ -1074,7 +1376,20 @@ else:
         "cek_manual": 0,
         "error": 0,
         "foto_retry": 0,  # internal: batas foto retry (bukan metrik tampil)
+        "baris_terpecah": 0,  # observability: baris grid rekonstruksi newline-dalam-sel
+        "retur_tanpa_faktur": 0,  # retur dari Excel income yg fakturnya udah dihapus
     }
+
+    # Index kolom grid (by nama, lihat KOLOM_GRID) — diisi SEKALI dari
+    # baris header yang ikut ke-copy tiap baca clipboard. None = header
+    # belum kebaca. Pola sama dgn pencarian 'Memo' by nama.
+    kolom_idx = {"v": None}
+
+    def ambil_kolom(row, kunci):
+        """Isi kolom `kunci` (nama logis di KOLOM_GRID) dari satu baris
+        grid, sudah strip. "" kalau header belum kebaca / kolom tak ada."""
+        i = (kolom_idx["v"] or {}).get(kunci, -1)
+        return row[i].strip() if 0 <= i < len(row) else ""
 
     for index, nomor in enumerate(orders, start=1):
         spin = spinner[index % len(spinner)]
@@ -1088,6 +1403,11 @@ else:
 
         try:
             metrik["diproses"] += 1
+
+            # SAFETY-NET: sebelum paste ke kotak SEARCH, pastikan teks
+            # beneran kode pesanan (panjang wajar + pola). Kalau ada yang
+            # mencoba mengetik teks mencurigakan -> ABORT seluruh proses.
+            nomor = validasi.cegah_ketik_tidak_aman(nomor, konteks=f"loop scan [{index}/{len(orders)}]")
 
             pyautogui.hotkey("ctrl", "a")
             pyperclip.copy(nomor)
@@ -1116,51 +1436,55 @@ else:
                 if catatan_merge.startswith("CEK MANUAL"):
                     metrik["cek_manual"] += 1
 
-                customer = row[8].strip()
-                memo = row[4].strip()
-                no_faktur = row[0].strip()   # NEW: nomor faktur ASLI (kolom 'Nomor'), beda sama kode yang dicari
-                status = row[17].strip().lower().replace(" ", "")
+                customer = ambil_kolom(row, "customer")
+                memo = ambil_kolom(row, "memo")
+                no_faktur = ambil_kolom(row, "nomor")   # nomor faktur ASLI (kolom 'Nomor'), beda sama kode yang dicari
+                status = ambil_kolom(row, "status").lower().replace(" ", "")
+                salesman = ambil_kolom(row, "salesman")
 
-                if len(row) > SALESMAN_COLUMN_INDEX:
-                    salesman = row[SALESMAN_COLUMN_INDEX].strip()
-                else:
-                    salesman = ""
+                # TGL di hasil = 'Tanggal Dana Dilepaskan' Shopee (kalau
+                # datanya ada, mode kecil); fallback = tanggal transaksi
+                # dari grid aplikasi.
+                tanggal = tanggal_dilepas_map.get(nomor) or ambil_kolom(row, "tanggal")
+                harga = ambil_kolom(row, "harga")
+                retur = ambil_kolom(row, "retur")
 
-                if len(row) > TANGGAL_COLUMN_INDEX:
-                    tanggal = row[TANGGAL_COLUMN_INDEX].strip()
-                else:
-                    tanggal = ""
-
-                if len(row) > PRICE_COLUMN_INDEX:
-                    harga = row[PRICE_COLUMN_INDEX].strip()
-                else:
-                    harga = ""
-
-                if len(row) > RETUR_COLUMN_INDEX:
-                    retur = row[RETUR_COLUMN_INDEX].strip()
-                else:
-                    retur = ""
-
-                # deteksi retur: kolom retur terisi DAN nilainya sama dengan harga
-                if retur and to_number(retur) == to_number(harga) and to_number(harga) != 0:
+                # deteksi retur: (1) dari Excel income (refund ke pembeli),
+                # ATAU (2) kolom Retur di grid sama dengan harga
+                if deteksi_retur_shopee(
+                    refund_excel_map.get(nomor, "0"),
+                    harga_excel_map.get(nomor, "0"),
+                    harga_asli_excel_map.get(nomor, "0"),
+                ):
+                    status_retur = "Retur"
+                elif retur and to_number(retur) == to_number(harga) and to_number(harga) != 0:
                     status_retur = "Retur"
                 else:
                     status_retur = "Berhasil"
 
                 validasi_harga, harga_excel = cek_validasi_harga(nomor, harga)
 
+                # Validasi TanggalPelunasan (grid inventory) vs Tanggal Dana
+                # Dilepaskan (Excel Shopee): keduanya terisi tapi beda setelah
+                # normalisasi = indikasi input tanggal salah. Salah satu
+                # kosong / kolom grid tidak ada -> skip (bukan anomali).
+                tgl_pelunasan = ambil_kolom(row, "pelunasan")
+                pelunasan_beda = tanggal_pelunasan_beda(tanggal_dilepas_map.get(nomor, ""), tgl_pelunasan)
+                if pelunasan_beda:
+                    print(f"\n⚠ {no_faktur} | {nomor} | Tanggal pencairan beda: dilepas {tanggal_dilepas_map.get(nomor)} vs pelunasan {tgl_pelunasan}")
+
                 if status in ("sudah", "paid", "lunas"):
-                    item_sudah = {"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "harga": harga, "retur": status_retur, "validasi": validasi_harga, "harga_excel": harga_excel, "jumlah_duplikat_row": jumlah_duplikat_row, "catatan_merge": catatan_merge, "jumlah_cocok_excel": jumlah_cocok_excel}
+                    item_sudah = {"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "harga": harga, "retur": status_retur, "validasi": validasi_harga, "harga_excel": harga_excel, "jumlah_duplikat_row": jumlah_duplikat_row, "catatan_merge": catatan_merge, "jumlah_cocok_excel": jumlah_cocok_excel, "tanggal_pelunasan_beda": bool(pelunasan_beda), "tgl_pelunasan": tgl_pelunasan}
                     sudah.append(item_sudah)
-                    hasil_urut.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "status": "Sudah", "validasi": validasi_harga, "harga": harga, "harga_excel": harga_excel, "retur": status_retur, "jumlah_duplikat_row": jumlah_duplikat_row, "catatan_merge": catatan_merge, "jumlah_cocok_excel": jumlah_cocok_excel})
+                    hasil_urut.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "status": "Sudah", "validasi": validasi_harga, "harga": harga, "harga_excel": harga_excel, "retur": status_retur, "jumlah_duplikat_row": jumlah_duplikat_row, "catatan_merge": catatan_merge, "jumlah_cocok_excel": jumlah_cocok_excel, "tanggal_pelunasan_beda": bool(pelunasan_beda), "tgl_pelunasan": tgl_pelunasan})
                     if SHOW_DETAIL_LOG:
                         tanda_validasi = f" | Validasi:{validasi_harga}" if validasi_harga != "-" else ""
                         tanda_dup = f" | {teks_duplikat(item_sudah)}" if jumlah_duplikat_row > 1 else ""
                         print(f"\n🟢 {no_faktur} | {tanggal} | {customer} | {salesman} | {memo} | Rp{harga} | SUDAH | {status_retur}{tanda_validasi}{tanda_dup}")
                 else:
-                    item_belum = {"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "harga": harga, "retur": status_retur, "validasi": validasi_harga, "harga_excel": harga_excel, "jumlah_duplikat_row": jumlah_duplikat_row, "catatan_merge": catatan_merge, "jumlah_cocok_excel": jumlah_cocok_excel}
+                    item_belum = {"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "harga": harga, "retur": status_retur, "validasi": validasi_harga, "harga_excel": harga_excel, "jumlah_duplikat_row": jumlah_duplikat_row, "catatan_merge": catatan_merge, "jumlah_cocok_excel": jumlah_cocok_excel, "tanggal_pelunasan_beda": bool(pelunasan_beda), "tgl_pelunasan": tgl_pelunasan}
                     belum.append(item_belum)
-                    hasil_urut.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "status": "Belum", "validasi": validasi_harga, "harga": harga, "harga_excel": harga_excel, "retur": status_retur, "jumlah_duplikat_row": jumlah_duplikat_row, "catatan_merge": catatan_merge, "jumlah_cocok_excel": jumlah_cocok_excel})
+                    hasil_urut.append({"nomor": nomor, "no_faktur": no_faktur, "salesman": salesman, "customer": customer, "tanggal": tanggal, "memo": memo, "status": "Belum", "validasi": validasi_harga, "harga": harga, "harga_excel": harga_excel, "retur": status_retur, "jumlah_duplikat_row": jumlah_duplikat_row, "catatan_merge": catatan_merge, "jumlah_cocok_excel": jumlah_cocok_excel, "tanggal_pelunasan_beda": bool(pelunasan_beda), "tgl_pelunasan": tgl_pelunasan})
                     if SHOW_DETAIL_LOG:
                         tanda_validasi = f" | Validasi:{validasi_harga}" if validasi_harga != "-" else ""
                         tanda_dup = f" | {teks_duplikat(item_belum)}" if jumlah_duplikat_row > 1 else ""
@@ -1174,7 +1498,6 @@ else:
                     pyautogui.press("up")
                     time.sleep(DELAY_AFTER_UP)
             else:
-                metrik["not_found"] += 1
                 if FOTO_AKTIF:
                     ambil_screenshot(nomor, "NOT_FOUND", "final")
 
@@ -1183,15 +1506,56 @@ else:
                 # ditekan biar cursor balik ke search box buat ctrl+a di kode
                 # selanjutnya.
                 pyautogui.press("up")
-                not_found.append(nomor)
-                hasil_urut.append({"nomor": nomor, "no_faktur": "-", "salesman": "-", "customer": "-", "tanggal": "", "memo": "-", "status": "Not Found", "validasi": "-", "harga": "", "harga_excel": "", "jumlah_duplikat_row": 1, "catatan_merge": "", "jumlah_cocok_excel": 0})
 
-                if SHOW_DETAIL_LOG:
-                    print(f"\n🔴 {nomor} | NOT FOUND")
-                    if debug_notfound_shown < DEBUG_NOTFOUND_LIMIT:
-                        debug_notfound_shown += 1
-                        print(f"   [DEBUG] alasan gagal : {debug_info['reason']}")
-                        print(f"   [DEBUG] raw clipboard: {debug_info['raw']!r}")
+                # FIX BUG "RETUR tercatat TIDAK ADA FAKTUR": baris income
+                # Shopee yang retur (kolom 'Jumlah Pengembalian Dana Ke
+                # Pembeli' != 0) TIDAK PUNYA baris faktur penjualan di
+                # aplikasi (barisnya sudah dihapus waktu refund). Detection
+                # retur harus dievaluasi dari data Excel SEBELUM/INDEPENDEN
+                # dari temuan faktur — kalau tidak, retur seperti
+                # 260907DWRKTD19 (refund -150000, total -17100) salah
+                # masuk kategori Not Found.
+                #
+                # Di sini: 'rows is None' (faktur tidak ada) TETAP dicatat
+                # sebagai Retur kalau data Excel-nya menandai refund. Nominal
+                # refund + total (biaya yang tetap terpotong) disimpan di
+                # catatan_merge supaya tidak hilang di laporan.
+                if deteksi_retur_shopee(
+                    refund_excel_map.get(nomor, "0"),
+                    harga_excel_map.get(nomor, "0"),
+                    harga_asli_excel_map.get(nomor, "0"),
+                ):
+                    # retur tanpa faktur asal -> dicatat Retur dengan flag
+                    catatan_retur = catatan_retur_shopee(
+                        refund_excel_map.get(nomor, "0"),
+                        harga_excel_map.get(nomor, "0"),
+                        tanpa_faktur=True,
+                    )
+                    hasil_urut.append({
+                        "nomor": nomor, "no_faktur": "-", "salesman": "-", "customer": "-",
+                        "tanggal": tanggal_dilepas_map.get(nomor, "") or tanggal_pesanan_excel_map.get(nomor, ""),
+                        "memo": "-", "status": "Belum", "retur": "Retur",
+                        "validasi": "-", "harga": harga_excel_map.get(nomor, ""),
+                        "harga_excel": harga_excel_map.get(nomor, ""),
+                        "jumlah_duplikat_row": 1, "catatan_merge": catatan_retur,
+                        "jumlah_cocok_excel": 0,
+                        "tanggal_pelunasan_beda": False, "tgl_pelunasan": "",
+                    })
+                    belum.append(hasil_urut[-1])
+                    metrik["retur_tanpa_faktur"] += 1
+                    if SHOW_DETAIL_LOG:
+                        print(f"\n↩️  {nomor} | RETUR (tanpa faktur asal) | {catatan_retur}")
+                else:
+                    metrik["not_found"] += 1
+                    not_found.append(nomor)
+                    hasil_urut.append({"nomor": nomor, "no_faktur": "-", "salesman": "-", "customer": "-", "tanggal": tanggal_dilepas_map.get(nomor, ""), "memo": "-", "status": "Not Found", "validasi": "-", "harga": "", "harga_excel": "", "jumlah_duplikat_row": 1, "catatan_merge": "", "jumlah_cocok_excel": 0})
+
+                    if SHOW_DETAIL_LOG:
+                        print(f"\n🔴 {nomor} | NOT FOUND")
+                        if debug_notfound_shown < DEBUG_NOTFOUND_LIMIT:
+                            debug_notfound_shown += 1
+                            print(f"   [DEBUG] alasan gagal : {debug_info['reason']}")
+                            print(f"   [DEBUG] raw clipboard: {debug_info['raw']!r}")
 
             if index % CHECKPOINT_EVERY == 0:
                 save_checkpoint()
@@ -1234,19 +1598,33 @@ else:
     print("HASIL SCAN")
     print("=" * 60)
     print()
-    total_sudah = sum(to_number(x["harga"]) for x in sudah)
-    total_belum = sum(to_number(x["harga"]) for x in belum)
+    # CEK MANUAL TIDAK ikut total harga utama (harga yang dipakai = baris
+    # pertama, belum tentu benar) — dipisah + di-flag eksplisit di bawah.
+    cek_manual_items = [x for x in (sudah + belum) if x.get("catatan_merge", "").startswith("CEK MANUAL")]
+    verified_items = [x for x in (sudah + belum) if not x.get("catatan_merge", "").startswith("CEK MANUAL")]
+
+    total_sudah = sum(to_number(x["harga"]) for x in sudah if not x.get("catatan_merge", "").startswith("CEK MANUAL"))
+    total_belum = sum(to_number(x["harga"]) for x in belum if not x.get("catatan_merge", "").startswith("CEK MANUAL"))
     jumlah_retur = sum(1 for x in (sudah + belum) if x["retur"] == "Retur")
-    jumlah_selisih = sum(1 for x in (sudah + belum) if x.get("validasi") == "SELISIH")
-    jumlah_divalidasi = sum(1 for x in (sudah + belum) if x.get("validasi") in ("OK", "SELISIH"))
+    jumlah_selisih = sum(1 for x in verified_items if x.get("validasi") == "SELISIH")
+    jumlah_divalidasi = sum(1 for x in verified_items if x.get("validasi") in ("OK", "SELISIH"))
+    # Status OK = sama dengan kolom STATUS 'OK' di Excel: SUDAH bayar,
+    # bukan retur, bukan CEK MANUAL, harga validasi bukan SELISIH.
+    jumlah_status_ok = sum(1 for x in sudah if x.get("retur") != "Retur" and not x.get("catatan_merge", "").startswith("CEK MANUAL") and x.get("validasi") != "SELISIH")
+    # Beda/Cek Manual (card UI): semua item berstatus CEK di Excel =
+    # belum bayar + selisih + retur + cek manual. Sukses+Beda+Not Found
+    # = total item.
+    jumlah_beda_cek = len(sudah) + len(belum) - jumlah_status_ok
     jumlah_double = sum(1 for x in (sudah + belum) if x.get("jumlah_duplikat_row", 1) > 1)
-    jumlah_double_beda_harga = sum(1 for x in (sudah + belum) if x.get("catatan_merge", "").startswith("CEK MANUAL"))
+    jumlah_double_beda_harga = len(cek_manual_items)
     jumlah_duplikasi_tervalidasi = sum(1 for x in (sudah + belum) if "TERDETEKSI DATA DUPLIKASI" in x.get("catatan_merge", ""))
 
     print(f"🟢 Sudah     : {len(sudah)}  (Rp{total_sudah:,})")
     print(f"🟡 Belum     : {len(belum)}  (Rp{total_belum:,})")
     print(f"🔴 Not Found : {len(not_found)}")
     print(f"↩️  Retur     : {jumlah_retur}")
+    if metrik["retur_tanpa_faktur"]:
+        print(f"   ↳️  retur tanpa faktur asal (dari Excel income) : {metrik['retur_tanpa_faktur']}")
     if jumlah_double:
         print(f"🔁 Double Faktur (baris duplikat digabung) : {jumlah_double}")
     if jumlah_double_beda_harga:
@@ -1255,14 +1633,22 @@ else:
         print(f"🚨 Duplikasi Tervalidasi (>1 row cocok harga Excel) : {jumlah_duplikasi_tervalidasi}")
     if jumlah_divalidasi > 0:
         print(f"⚠️  Selisih Harga (Excel vs Aplikasi) : {jumlah_selisih} dari {jumlah_divalidasi} yang divalidasi")
+    print(f"✔ Status OK  : {jumlah_status_ok}")
+    print(f"≠ Beda   : {jumlah_beda_cek} (belum/selisih/retur/cek manual)")
     print()
     total_aplikasi = total_sudah + total_belum
-    total_excel = sum(to_number(x.get("harga_excel", "")) for x in (sudah + belum) if x.get("harga_excel"))
-    total_ok = sum(to_number(x["harga"]) for x in (sudah + belum) if x.get("validasi") == "OK")
+    total_excel = sum(to_number(x.get("harga_excel", "")) for x in verified_items if x.get("harga_excel"))
+    total_ok = sum(to_number(x["harga"]) for x in verified_items if x.get("validasi") == "OK")
 
     print(f"💰 Total Harga Aplikasi   : Rp{total_aplikasi:,}")
     print(f"💰 Total Harga Excel      : Rp{total_excel:,}")
     print(f"💰 Total Harga Status OK  : Rp{total_ok:,}")
+    if cek_manual_items:
+        total_cek_excel = sum(to_number(x.get("harga_excel", "")) for x in cek_manual_items if x.get("harga_excel"))
+        if total_cek_excel:
+            print(f"❓ CEK MANUAL ({len(cek_manual_items)} item, belum terverifikasi, TIDAK termasuk total di atas): nilai Excel Rp{total_cek_excel:,}")
+        else:
+            print(f"❓ CEK MANUAL ({len(cek_manual_items)} item, belum terverifikasi, TIDAK termasuk total di atas — tanpa data harga Excel)")
     print()
     print(f"⏱ Waktu      : {runtime} detik  (~{runtime/max(len(orders),1):.2f} detik/baris)")
     print()
@@ -1288,13 +1674,19 @@ else:
     print_summary_table(hasil_urut)
 
     # =============================
-    # COPY SEMUA KODE/MEMO KE CLIPBOARD (nomor yang punya kode aja)
+    # COPY SEMUA KODE/MEMO KE CLIPBOARD (termasuk yang NOT FOUND,
+    # biar bisa discan ulang / dicek manual)
     # =============================
     all_items = sudah + belum
     memo_text = "\n".join(item["memo"] for item in all_items)
+    if not_found:
+        memo_text += ("\n" if memo_text else "") + "\n".join(not_found)
     pyperclip.copy(memo_text)
 
-    print("\n📋 Semua kode pesanan (Memo) berhasil disalin ke clipboard.")
+    if not_found:
+        print(f"\n📋 Semua kode pesanan (Memo) + {len(not_found)} kode NOT FOUND berhasil disalin ke clipboard.")
+    else:
+        print("\n📋 Semua kode pesanan (Memo) berhasil disalin ke clipboard.")
 
     nama_file_hasil = export_final()
 
@@ -1305,4 +1697,8 @@ else:
     print()
     print(f"✔ {nama_file_hasil} berhasil dibuat")
 
-input("\nENTER untuk keluar...")
+# Di mode UI, proses harus KELUAR sendiri (ToolFinished di UI nunggu
+# exit). "ENTER untuk keluar" cuma buat mode manual (jalan langsung dari
+# terminal, biar window CMD gak langsung nutup).
+if not UI_MODE:
+    input("\nENTER untuk keluar...")

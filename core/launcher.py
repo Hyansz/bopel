@@ -1,51 +1,35 @@
 """Tool launcher — runs external Python scripts as subprocesses.
 
 Each tool runs as an isolated child process.  stdout/stderr are piped
-back to the Textual UI via a reader thread that posts ToolOutput
-messages line-by-line.  The Stop button calls terminate() then kill()
-on the subprocess so the child is actually stopped, not just the UI.
+back line-by-line via the ``on_output`` callback (reader thread).  Stop
+calls terminate() then kill() on the subprocess so the child is actually
+stopped, not just the UI.
+
+UI-agnostic (refactor Fase 2 migrasi pywebview): launcher tidak lagi
+mengenal Textual / post_message — pemanggil mengirim callback
+``on_output(line)``, ``on_started(tool_name)``, ``on_finished(tool_name,
+success, return_code, error)``. Textual (ui/app.py) membungkus callback
+menjadi post_message; pywebview (app.py) memakai callback langsung.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-
-from textual.app import App
-from textual.message import Message
 
 from core.config import Config
 from core.logger import AppLogger
 
 
-# ── Textual messages emitted by the launcher ──────────────────────────
-class ToolOutput(Message):
-    def __init__(self, text: str, worker_id: str = "") -> None:
-        super().__init__()
-        self.text = text
-        self.worker_id = worker_id
-
-
-class ToolStarted(Message):
-    def __init__(self, tool_name: str, worker_id: str = "") -> None:
-        super().__init__()
-        self.tool_name = tool_name
-        self.worker_id = worker_id
-
-
-class ToolFinished(Message):
-    def __init__(self, tool_name: str, success: bool = True,
-                 return_code: int = 0, error: str = "",
-                 worker_id: str = "") -> None:
-        super().__init__()
-        self.tool_name = tool_name
-        self.success = success
-        self.return_code = return_code
-        self.error = error
-        self.worker_id = worker_id
+# ── callback signatures ──────────────────────────────────────────────
+OnOutput = Callable[[str], None]                             # line
+OnStarted = Callable[[str], None]                            # tool_name
+OnFinished = Callable[[str, bool, int, str], None]           # tool_name, success, return_code, error
 
 
 # ── Data class for tracking a running tool ────────────────────────────
@@ -54,9 +38,7 @@ class ToolRunner:
     tool_name: str
     script_path: str
     process: subprocess.Popen | None = None
-    reader_thread: threading.Thread | None = None
     running: bool = False
-    start_time: float = 0.0
 
 
 # ── Main launcher ─────────────────────────────────────────────────────
@@ -79,10 +61,17 @@ class ToolLauncher:
                 return t
         return None
 
-    def start(self, script_name: str, app: App) -> bool:
+    def start(
+        self,
+        script_name: str,
+        on_output: OnOutput | None = None,
+        on_started: OnStarted | None = None,
+        on_finished: OnFinished | None = None,
+    ) -> bool:
         """Launch a tool script as a subprocess.
 
         Returns True on success, False if already running or script not found.
+        Output/finish dikirim lewat callback (bukan post_message Textual).
         """
         if script_name in self.active_tools and self.active_tools[script_name].running:
             AppLogger.warning(f"Tool already running: {script_name}")
@@ -92,12 +81,38 @@ class ToolLauncher:
             script_path = self.resolve_script(script_name)
         except FileNotFoundError:
             AppLogger.error(f"Script not found: {script_name}")
-            app.post_message(ToolOutput(f"[ERROR] Script not found: {script_name}"))
-            app.post_message(ToolFinished(script_name, success=False, error="Script not found"))
+            if on_output:
+                on_output(f"[ERROR] Script not found: {script_name}")
+            if on_finished:
+                on_finished(script_name, False, 0, "Script not found")
             return False
 
         tool_cfg = self.find_tool_config(script_name)
         display_name = tool_cfg["name"] if tool_cfg else script_name
+
+        # Tool jalan HIDDEN (tanpa window CMD terpisah) + mode non-interaktif:
+        # - CREATE_NO_WINDOW (Windows): child gak dapat console sendiri,
+        #   jadi gak ada window CMD yang muncul. Output tetap ke stdout PIPE
+        #   yang di-stream ke pemanggil, dan Stop (terminate/kill) tetap normal.
+        # - env BOPEL_UI_MODE=1: tool tau dia dijalankan dari UI -> semua
+        #   prompt input() (yang gak bisa dijawab dari window) di-skip /
+        #   auto-continue, dan aktivasi window warehouse dilakukan otomatis
+        #   (lihat core/window.py).
+        startupinfo = None
+        creationflags = 0
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            creationflags = subprocess.CREATE_NO_WINDOW
+        env = dict(os.environ)
+        env["BOPEL_UI_MODE"] = "1"
+        # WAJIB: stdout child di-stream via PIPE (bukan console). Di Windows,
+        # Python child yang stdout-nya pipe default-nya pakai encoding cp1252
+        # -> print("✔") / print("⚠") (banyak dipakai di check.py & scan.py)
+        # bikin UnicodeEncodeError CRASH pas dijalankan dari UI. PYTHONUTF8=1
+        # memaksa UTF-8 buat stdout/stderr pipe.
+        env["PYTHONUTF8"] = "1"
 
         # Create subprocess with piped stdout+stderr
         try:
@@ -110,12 +125,17 @@ class ToolLauncher:
                 errors="replace",
                 bufsize=1,
                 cwd=str(script_path.parent),
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+                env=env,
             )
         except Exception as exc:
             error_msg = f"{type(exc).__name__}: {exc}"
             AppLogger.error(f"Failed to start {display_name}: {error_msg}")
-            app.post_message(ToolOutput(f"[ERROR] {error_msg}"))
-            app.post_message(ToolFinished(display_name, success=False, error=error_msg))
+            if on_output:
+                on_output(f"[ERROR] {error_msg}")
+            if on_finished:
+                on_finished(display_name, False, 0, error_msg)
             return False
 
         runner = ToolRunner(
@@ -127,16 +147,15 @@ class ToolLauncher:
         self.active_tools[script_name] = runner
 
         AppLogger.info(f"Starting tool: {display_name} (pid={process.pid})")
-        app.post_message(ToolStarted(display_name, worker_id=script_name))
+        if on_started:
+            on_started(display_name)
 
-        # Reader thread: reads stdout line-by-line, posts messages
-        reader = threading.Thread(
+        # Reader thread: reads stdout line-by-line, invokes on_output
+        threading.Thread(
             target=self._read_output,
-            args=(app, script_name, runner),
+            args=(script_name, runner, on_output, on_finished),
             daemon=True,
-        )
-        runner.reader_thread = reader
-        reader.start()
+        ).start()
         return True
 
     def stop(self, script_name: str) -> None:
@@ -163,8 +182,13 @@ class ToolLauncher:
 
     # ── reader thread target ──────────────────────────────────────────
     @staticmethod
-    def _read_output(app: App, script_name: str, runner: ToolRunner) -> None:
-        """Read subprocess stdout line-by-line and post ToolOutput messages."""
+    def _read_output(
+        script_name: str,
+        runner: ToolRunner,
+        on_output: OnOutput | None,
+        on_finished: OnFinished | None,
+    ) -> None:
+        """Read subprocess stdout line-by-line and invoke on_output."""
         proc = runner.process
         if proc is None or proc.stdout is None:
             return
@@ -172,8 +196,8 @@ class ToolLauncher:
         try:
             for line in proc.stdout:
                 line = line.rstrip("\n\r")
-                if line:
-                    app.post_message(ToolOutput(line, worker_id=script_name))
+                if line and on_output:
+                    on_output(line)
         except Exception:
             pass
         finally:
@@ -198,9 +222,5 @@ class ToolLauncher:
             AppLogger.error(f"Tool failed: {runner.tool_name} (exit code {return_code})")
 
         runner.running = False
-        app.post_message(ToolFinished(
-            runner.tool_name,
-            success=success,
-            return_code=return_code or 0,
-            worker_id=script_name,
-        ))
+        if on_finished:
+            on_finished(runner.tool_name, success, return_code, "")
