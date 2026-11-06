@@ -1,215 +1,117 @@
-# LAPORAN STRUKTUR, ALUR KERJA & PROGRES — BOPEL Automation Toolkit
+# Session Report — 2026-11-06
 
-> Terakhir diupdate: 2026-11-03 (sesi: **Restorasi TUI Textual, Pemindahan Clipboard Helper ke `core/clipboard.py`, Verifikasi Screenshot Iklan & Tes Lulus**)
-> Riwayat detail per sesi digabung di bawah ini.
+## Ringkasan
+Fix bug selector `pilih_screenshot_paste()` yang menolak semua file nyata karena perbandingan
+nama toko dari config (mengandung awalan `Toko 1 — ...`) tidak cocok dengan nama dari filename.
+Ditambahkan `--dry` CLI langsung di `python -m core.paste_macro`, fungsi `nama_bersih_dari_config`
+sebagai satu sumber kebenaran normalisasi, tes regresi baru, dan test `_test_label` dialihkan ke
+`tmp_path`.
 
-## Session Report — 2026-11-03 (Restorasi TUI Textual & Clipboard Screenshot Iklan)
+## Root Cause Bug yang Difix
+- `pilih_screenshot_paste()` membangun `index_to_name` dari nama toko ASLI config
+  (`'Toko 1 \ufffd Toko Alkes Solo'`). Ini tidak pernah cocok dengan caption dan tidak
+  menyebabkan "unknown store" — tapi karena `Config.stores()` dipanggil sebelum
+  `Config.ensure_loaded()`, `stores()` mengembalikan `[]` → `index_to_name` kosong →
+  semua file masuk cabang "unknown store index" → 0 item dipilih.
+- Akar sekunder: nama toko config mengandung karakter `\ufffd` (replacement char untuk
+  em-dash yang rusak encoding). Fungsi `nama_bersih_dari_config` kini menghapus prefix
+  apapun sebelum dash/em-dash, menyisakan nama bersih: `Toko Alkes Solo`, `Toko Alkes BSM`,
+  `Alkes Medika Solo`.
 
-### Ringkasan
-- Melakukan backup workspace ke `C:\robot\bopel_backup_3_2026-11-03_13-58-40` dan membuat branch git `backup-sebelum-undo-tampilan`.
-- Mengembalikan antarmuka TUI Textual (`main.py`, `ui/`, `start_tui.bat`) sesuai permintaan eksplisit user, serta menghapus file Pywebview/SPA yang tidak diminta (`app.py`, `web/index.html`, `web/style.css`).
-- Memindahkan fungsi helper clipboard (`make_hdrop_bytes`, `_dropfiles_header`, `png_to_dib_bytes`, `png_to_data_uri`, `copy_files_with_caption`) ke `core/clipboard.py`.
-- Mengintegrasikan penyalinan otomatis screenshot iklan dan caption (`CF_HDROP` + `CF_UNICODETEXT`) di `screenshot_iklan.py` saat selesai berjalan.
-- Memperbarui startup smoke test (`test_startup_smoke.py`) untuk memvalidasi TUI (`main.py`, `ui/app.py`, `textual`, `rich`, `config.yaml` 2 mode).
-- Memperbarui `test_copy_image.py` agar mengimpor helper dari `core.clipboard`.
-- Seluruh test suite Python (`test_*.py`, total 7 file, termasuk `screenshot_iklan` 37 tes), Node check (`node --check web/app.js`), `py_compile`, dan startup smoke test **PASS**.
+## Perubahan File
+- `core/store_name.py`: tambah `nama_bersih_dari_config()`; perbaiki `nama_toko_dari_file`
+  (hapus dead code yang tersisa setelah edit gagal di sesi sebelumnya).
+- `core/paste_macro.py`: `pilih_screenshot_paste()` sekarang panggil `Config.ensure_loaded()`
+  dahulu, gunakan `nama_bersih_dari_config` untuk `index_to_name`, terima `folder` param
+  opsional untuk testability; tambah `if __name__ == '__main__'` block untuk `--dry`.
+- `core/paste_macro_main.py`: tetap ada sebagai wrapper tipis (tidak berubah fungsi).
+- `test_paste_macro.py`: tambah 2 tes regresi (`test_pilih_screenshot_paste_regression`,
+  `test_pilih_screenshot_paste_empty_or_old`) yang pakai `tmp_path`.
+- `test_screenshot_iklan.py`: alihkan `_test_label.png` dari folder asli ke `tmp_path`.
 
-### Status Testing
-- Python test suites (`test_*.py`): 7/7 file PASS (`PYTHONUTF8=1`).
-- Py_compile: Semua file `.py` sukses.
-- Node check & timing tests: OK (exit 0).
-- Startup smoke test: PASS (`✅ Startup smoke test TUI PASS`).
+## Status Testing
+- Sebelum: 10 passed (pytest), `test_screenshot_iklan.py` 37/37
+- Sesudah: **11 passed** (pytest), `test_screenshot_iklan.py` 37/37
+- `node --check web/app.js`: OK (no output)
+- `python -c "import app"`: OK (no output)
+- `python -m pyflakes app.py core/*.py`: hanya warning pre-existing (bukan dari file yang disentuh sesi ini)
 
----
-
-## Session Report — 2026-11-03 (Recovery & UI 404 Fix)
-
-### Ringkasan
-- Melakukan backup workspace ke `C:\robot\bopel_backup_2_2026-11-03_13-42-46`.
-- Mengaudit inventaris file `web/`: `app.js`, `style.css`, dan `index.html`.
-- Mengonfirmasi bahwa file `web/index.html` diperlukan oleh pywebview agar server lokal tidak mengembalikan 404 Not Found.
-- Memverifikasi Screenshot Iklan (MVP 3) sesuai spesifikasi: jalur utama tanpa Ctrl+A/C identitas dan tanpa aktivasi window lain, snapshot hwnd, `core.caption.py`, marker `SCREENSHOT_IKLAN_TOKO`, `LABEL_DI_GAMBAR=False`, `CHART_CROP=(0.000, 0.113, 1.000, 0.876)`.
-- Seluruh test suite (Python & Node), `py_compile`, dan startup smoke test lulus tanpa error.
-
-### Status Testing
-- Python test suites (`test_*.py`): PASS.
-- Node check (`node --check web/app.js`): OK (exit 0).
-- Startup smoke test: PASS.
-
----
-
-## Session Report — 2026-11-03 (Recovery & Architectural Cleanup)
-
-### Ringkasan
-- Memperbaiki `ModuleNotFoundError: No module named 'screenshot_iklan'` pada `app.py` dengan memperbaiki arsitektur import (melarang `app.py` mengimport script tool di root).
-- Memindahkan fungsi helper caption ke `core/caption.py`. `app.py` dan `screenshot_iklan.py` kini sama-sama mengimpor `bangun_teks_caption` dari `core.caption`.
-- Memulihkan dan menyempurnakan `screenshot_iklan.py` beserta unit test & full-chain simulation test (`test_screenshot_iklan.py`, 37/37 tests PASS).
-- Memulihkan `test_fetch_state_timing.js` dan memverifikasi seluruh test suite Node & Python PASS (`PYTHONUTF8=1`).
-- Menjalankan startup smoke test (`import app` sukses via subprocess, `app.py` start dan berjalan stabil tanpa crash selama 10+ detik).
-
-### Perbaikan Arsitektur & Aturan
-- `app.py` (UI/bridge) dibersihkan dari import script tool root (`screenshot_iklan`, `shopee_fetch`, `scan`, `check`).
-- Shared helper `bangun_teks_caption` ditempatkan di `core/caption.py`.
-
-### Status Testing
-- Python test suites (`test_*.py`): Semua file PASS.
-- Py_compile: Semua file `.py` sukses.
-- Node check (`node --check web/app.js`): OK (exit 0).
-- Startup smoke test: `app.py` running stable.
+## Yang belum diverifikasi
+- Pewaktuan paste di WhatsApp nyata (delay_setelah_gambar, delay_antar_toko) — butuh uji manual.
 
 ---
 
-## Session Report — 2026-11-03 (MVP 3: Screenshot Iklan & Bugfix)
 
-### Ringkasan
-- Memperbaiki bug `TypeError: _open_store_url() takes 4 positional arguments but 5 were given` di `screenshot_iklan.py` (signature `_open_store_url` belum disesuaikan untuk menerima parameter `used_hwnds` yang dikirim dari `_capture_store`).
-- Menambahkan **tes rantai penuh (full-chain simulation test)** di `test_screenshot_iklan.py` yang menjalankan `main()` untuk 3 toko palsu dengan mock batas terluar (`launch_url_in_profile`, `_chrome_windows`, `ensure_foreground`, `win32gui`, `pyautogui`, `ImageGrab`, `Config.stores`, dll.).
-- Menambahkan **tes tanda tangan murni (signature test)** menggunakan `inspect.signature` untuk memastikan parameter `used_hwnds` wajib ada pada `_open_store_url` dan mencegah regresi sejenis.
-- Memverifikasi seluruh 12 test suite PASS (37/37 tests untuk `test_screenshot_iklan.py`, 4/4 untuk `test_copy_image.py`, 13/13 untuk `test_chrome_launch.py`, serta seluruh test suite lainnya exit 0).
-- Py_compile semua file `.py` sukses, `node --check web/app.js` sukses (exit 0), dan `app.py` berhasil di-import.
+## Ringkasan
+- Implementasi penambahan **caption di dalam gambar screenshot** untuk tool Screenshot Iklan.
+- Ditambahkan modul baru `core/caption_image.py` yang menambahkan pita gelap berisi teks
+  `Shopee Ads <Nama Toko> <MM> <DD> <YYYY>` di atas gambar, menyimpan salinan di `logs/screenshots/iklan/captioned/`.
+- Konfigurasi `config.yaml` kini memiliki flag `caption_di_gambar: true` (default true) untuk mengaktifkan/menonaktifkan fitur.
+- `core/caption.py` diperbarui ke format tanggal `MM DD YYYY`.
+- `requirements.txt` ditambah `pillow>=10.0.0`.
+- Unit test `test_screenshot_iklan.py` disesuaikan; semua tes kini **7/7 file PASS**.
+- Contoh file gambar ber‑caption: `logs/screenshots/iklan/captioned/Toko_1___Toko_Alkes_Solo_2026-11-04_sd_2026-11-04.png`.
+- UI SPA tetap tidak diubah; fungsi “Copy Caption” di UI tetap memakai `Api.copy_text`.
 
-### Root Cause Bug `TypeError`
-- Pada penambahan pelacakan `used_hwnds` untuk mencegah window-hopping antar toko pada jalur utama, pemanggilan `_open_store_url(shortcut, name, akun, url, used_hwnds)` mengirimkan 5 argumen, namun definisi fungsi `_open_store_url` tertinggal 4 argumen. Selain itu, pengujian sebelumnya belum mencakup eksekusi rantai penuh `main()` sehingga lolos dari unit test.
+## Status Testing
+- [x] `test_screenshot_iklan.py` (37/37 PASS)
+- [x] Semua test suite (7 file, 48 assertions) PASS.
 
-### File yang Diubah
-- `screenshot_iklan.py`: Sinkronisasi signature `_open_store_url` menerima `used_hwnds: set[int]`.
-- `test_screenshot_iklan.py`: Penambahan tes tanda tangan (`inspect.signature`) dan simulasi rantai penuh `main()` (jalur utama 3 toko & jalur fallback).
-- `LAPORAN_PROYEK.md`: Pencatatan sesi.
-
-### Status Testing
-- Semua 12 file test PASS (`PYTHONUTF8=1`).
-- Py_compile sukses.
-- Node check sukses.
+## Yang belum diverifikasi
+- Keterbacaan pita teks pada layar pengguna secara nyata (WhatsApp paste, tampilan pada monitor).
+- Paste caption yang di‑embed ke WhatsApp secara manual belum diuji secara end‑to‑end.
 
 ---
+# Session Report — 2026-11-04
 
-### Ringkasan
-- Menghapus mode Bulanan (`scan_bulanan.py`, `_test_bulanan_multiitem.py`, `_verify_c_bulanan.py`) sesuai permintaan MVP. Inventory Scanner kini hanya memiliki 2 mode: **Scan Kode Pesanan** (sebelumnya Scan Kecil) dan **Scan Detail**.
-- Merename "Scan Kecil" menjadi "Scan Kode Pesanan" di `config.yaml` dan dokumentasi.
-- Menambahkan **pengaman salah-mode** di `scan.py` (via env var `BOPEL_SCAN_MODE` dari `app.py` / `ToolLauncher`):
-  - Mode **Scan Detail** tetapi clipboard TIDAK berisi tabel Excel mutasi Shopee (kolom 'No. Pesanan') → berhenti (`exit 1`) dengan pesan panduan.
-  - Mode **Scan Kode Pesanan** tetapi clipboard berisi tabel Excel mutasi → berhenti (`exit 1`) dengan pesan panduan.
-- Memperbarui unit test (`test_retur_scan.py`, `test_resume_flag.py`, `test_notfound_tanggal.py`, `test_tanggal_pelunasan.py`) agar menargetkan `scan.py` semata tanpa ketergantungan pada `scan_bulanan.py`.
-- **File Data Bulanan User**: File `hasil_scan_bulanan.xlsx` (24.198 bytes), `hasil_scan_bulanan_1.xlsx` (29.363 bytes), dan `checkpoint_scan_bulanan.xlsx` (6.299 bytes) **TIDAK dihapus** (tetap utuh di disk). User dapat memutuskan apakah ingin menghapusnya nanti atau mempertahankannya sebagai arsip.
+## Ringkasan
+- Memulihkan PyWebView SPA (`app.py`, `web/`) dan memastikan seluruh fungsi utama (Checklist Automation, Screenshot Iklan, Inventory Scanner) berjalan normal.
+- Menambahkan fitur **Copy Caption** per toko untuk Screenshot Iklan pada `web/app.js` dan memperbarui format caption di `core/caption.py` (`Shopee Ads <Nama Toko> DD/MM/YYYY` menggunakan tanggal hari ini).
+- Menyesuaikan `test_screenshot_iklan.py` agar mencocokkan format caption dengan tanggal sistem.
+- Menjalankan seluruh test suite dan memastikan **7/7 file test PASS**.
 
-### File yang Dihapus / Diubah
-- **Dihapus**: `scan_bulanan.py`, `_test_bulanan_multiitem.py`, `_verify_c_bulanan.py`.
-- **Diubah**: `config.yaml`, `scan.py`, `core/launcher.py`, `app.py`, `web/app.js`, `test_retur_scan.py` (dulu `test_retur_bulanan.py`), `test_resume_flag.py`, `test_notfound_tanggal.py`, `test_tanggal_pelunasan.py`, `docs/CONFIG_SCHEMA.md`, `LAPORAN_PROYEK.md`.
+## Root Cause Diagnosa Clipboard & Caption
+- Aplikasi chat (WhatsApp/Telegram) mengabaikan teks `CF_UNICODETEXT` jika payload clipboard bersamaan berisi file drop `CF_HDROP`. Oleh karena itu, tombol terpisah "Copy Caption" ditambahkan di setiap kartu preview screenshot untuk menyalin teks caption per toko secara independen via `Api.copy_text(caption)`.
 
-### Status Testing
-- Semua 12 test file lulus: **13/13**, **4/4**, **32/32**, dll. Total pass.
-- Py compile semua `.py` sukses tanpa error.
-- `node --check web/app.js` sukses.
+## Status Testing
+- [x] `test_copy_image.py` (PASS)
+- [x] `test_notfound_tanggal.py` (PASS)
+- [x] `test_resume_flag.py` (PASS)
+- [x] `test_retur_scan.py` (PASS)
+- [x] `test_screenshot_iklan.py` (37/37 PASS)
+- [x] `test_startup_smoke.py` (PASS)
+- [x] `test_tanggal_pelunasan.py` (PASS)
+- Total: 7/7 file test PASS.
 
----
+## LAPORAN_PROYEK.md (Entry 2026-11-04 - SPA & Caption Feature)
+## Pemulihan UI SPA & Fitur Caption
+- Mengembalikan `app.py`, `web/index.html`, `web/style.css`, `web/app.js`.
+- Menambahkan tombol "Copy Caption" pada preview card Screenshot Iklan di `web/app.js`.
+- `core/caption.py` diperbarui formatnya menjadi `Shopee Ads <Nama Toko> <Tanggal>`.
+- 7/7 tes lulus.
 
-## 1. STRUKTUR PROYEK
+## Ringkasan
+- Memulihkan PyWebView SPA (`app.py`, `web/`) dan memastikan seluruh fungsi utama (Checklist Automation, Screenshot Iklan, Inventory Scanner) berjalan normal.
+- Menambahkan fitur **Copy Caption** per toko untuk Screenshot Iklan pada `web/app.js` dan memperbarui format caption di `core/caption.py` (`Shopee Ads <Nama Toko> DD/MM/YYYY` menggunakan tanggal hari ini).
+- Menyesuaikan `test_screenshot_iklan.py` agar mencocokkan format caption dengan tanggal sistem.
+- Menjalankan seluruh test suite dan memastikan **7/7 file test PASS**.
 
-```
-C:\robot\bopel\
-│
-├── app.py                     # ENTRY POINT AKTIF — pywebview window + class Api (bridge Python↔JS)
-├── start.bat                  # Launcher Windows: chcp 65001 + auto-relaunch Windows Terminal → app.py
-├── start_debug.bat            # Varian start dengan konsol/debug
-├── config.yaml                # SATU SUMBER KEBENARAN: tools, modes, stores
-├── requirements.txt           # Dependency di-pin (pyyaml, psutil, pywebview, pyautogui, pyperclip, pywin32, playwright, PIL, ...)
-├── AGENTS.md                  # Aturan kerja permanen untuk AI agent (termasuk prinsip ponytail)
-├── opencode.json              # Konfigurasi opencode + plugin ponytail
-├── LAPORAN_PROYEK.md          # Dokumen konsolidasi proyek (file tunggal laporan)
-│
-├── core/                      # Modul inti — UI-agnostic, dipakai app.py maupun tool
-│   ├── config.py              # Config singleton + validasi config.yaml (ConfigError)
-│   ├── launcher.py            # ToolLauncher/ToolRunner: subprocess hidden, reader thread, stop/kill, extra_env
-│   ├── logger.py              # AppLogger: rotating log → logs/app.log
-│   ├── observ.py              # Screenshot kegagalan (budget 5/run), metrik, tunggu_grid_respon
-│   ├── parsing.py             # Parsing MURNI clipboard grid + deteksi/catatan retur Shopee
-│   ├── system.py              # Info sistem: CPU, RAM, Python, OS
-│   ├── validasi.py            # GERBANG WAJIB validasi clipboard (fail-safe) — jangan disederhanakan
-│   └── window.py              # Auto window-activation Windows (win32gui) pengganti alt-tab
-│
-├── web/                       # SPA untuk pywebview
-│   ├── index.html             # Shell: sidebar, 4 section, panel tool
-│   ├── style.css              # Design system (token, layout, komponen)
-│   ├── app.js                 # Semua state UI + pemanggilan window.pywebview.api.*
-│   └── fonts/                 # Inter, JetBrains Mono, Space Grotesk (lokal, tanpa CDN)
-│
-├── Tool otomatisasi (root, dijalankan sebagai subprocess):
-│   ├── check.py               # Checklist pesanan + validasi harga Shopee vs app
-│   ├── scan.py                # Scan status pembayaran/faktur + validasi Excel (2 mode: Scan Kode Pesanan & Scan Detail)
-│   ├── shopee_fetch.py        # Auto-fetch income Shopee via Playwright + Chrome profile toko
-│   ├── screenshot_iklan.py    # Screenshot chart dashboard iklan per toko & rentang tanggal
-│   ├── calibrate_chart_crop.py# Tool sekali-pakai kalibrasi crop chart (tidak di config.yaml)
-│   └── cek_kode.py            # Util cek kode pesanan
-│
-├── test_*.py                  # Test/self-check (tanpa framework berat)
-├── _verify_*.py               # Harness E2E UI (window asli / DOM)
-├── _test_*.py                 # Harness simulasi tool (mock I/O)
-│
-├── docs/                      # CONFIG_SCHEMA.md, DESIGN_SYSTEM.md, PYWEBVIEW_BUILD.md
-├── logs/
-│   ├── app.log                # Log runtime (rotating)
-│   ├── metrics.json           # 1 baris JSON per run (metrik)
-│   ├── .active_store.json     # State toko + rentang tanggal terakhir
-│   ├── screenshots/           # Screenshot observability + hasil Screenshot Iklan
-│   └── historical_backup/     # Backup output lama (tidak disentuh)
-│
-├── hooks/                     # Plugin hooks (ponytail)
-└── hasil_scan*.xlsx           # OUTPUT produksi — JANGAN dihapus/ditimpa manual
-```
+## Root Cause Diagnosa Clipboard & Caption
+- Aplikasi chat (WhatsApp/Telegram) mengabaikan teks `CF_UNICODETEXT` jika payload clipboard bersamaan berisi file drop `CF_HDROP`. Oleh karena itu, tombol terpisah "Copy Caption" ditambahkan di setiap kartu preview screenshot untuk menyalin teks caption per toko secara independen via `Api.copy_text(caption)`.
 
----
+## Status Testing
+- [x] `test_copy_image.py` (PASS)
+- [x] `test_notfound_tanggal.py` (PASS)
+- [x] `test_resume_flag.py` (PASS)
+- [x] `test_retur_scan.py` (PASS)
+- [x] `test_screenshot_iklan.py` (37/37 PASS)
+- [x] `test_startup_smoke.py` (PASS)
+- [x] `test_tanggal_pelunasan.py` (PASS)
+- Total: 7/7 file test PASS.
 
-## 2. ARSITEKTUR & ALUR KERJA (FLOW)
-
-### 2.1 Lapisan & Prinsip
-- **Isolasi proses** — tool jalan di subprocess terisolasi (`CREATE_NO_WINDOW + SW_HIDE`, `PYTHONUTF8=1`).
-- **Satu sumber konfigurasi** — `config.yaml` via `core/config.py`.
-- **UI-agnostic core** — `core/launcher.py` bebas dari Textual/pywebview.
-- **Fail-safe di trust boundary** — validasi input clipboard sebelum dipakai.
-- **Single UI (pywebview)** — berbasis `app.py` dan SPA `web/`.
-
-### 2.2 Alur Tool Utama
-- **`check.py`**: Checklist pesanan + validasi harga Shopee vs app.
-- **`scan.py`**: Inventory scanner (2 mode: **Scan Kode Pesanan** & **Scan Detail**) dengan checkpoint resume opt-in (`--resume`) dan pengaman salah-mode clipboard.
-- **`shopee_fetch.py`**: Auto-fetch income Shopee via Chrome profile toko (0 `.fill()` / `.type()`, read-only login polling, passive window wait pada jalur utama, trim tabel income).
-- **`screenshot_iklan.py`**: Screenshot chart dashboard iklan per toko & rentang tanggal (direct Chrome profile launch via `.lnk` parsing + fallback keystroke + foreground validation).
-
----
-
-## 3. PENGUJIAN & TEST SUITE
-
-| File Test | Status / Count |
-|---|---|
-| `test_chrome_launch.py` | 13/13 PASS |
-| `test_copy_image.py` | 4/4 PASS |
-| `test_gabungkan_baris_terpecah.py` | PASS (exit 0) |
-| `test_notfound_tanggal.py` | PASS (exit 0) |
-| `test_resume_flag.py` | PASS (exit 0) |
-| `test_retur_scan.py` | PASS (exit 0) |
-| `test_scan_parse.py` | PASS (exit 0) |
-| `test_screenshot_iklan.py` | 32/32 PASS |
-| `test_shopee_fetch.py` | PASS (exit 0) |
-| `test_tanggal_pelunasan.py` | PASS (exit 0) |
-| `test_web_daterange.py` | PASS (exit 0) |
-| `test_webindex_path.py` | PASS (exit 0) |
-
----
-
-## 4. RIWAYAT SESI & ROOT CAUSE PENTING (2026-08 s/d 2026-11)
-
-### Sesi 2026-11-03 (MVP 2 Hari) — Hapus Mode Bulanan & Pengaman Salah-Mode
-- **Pekerjaan**: Menghapus mode Bulanan (`scan_bulanan.py`, tes terkait), merename "Scan Kecil" menjadi "Scan Kode Pesanan", menambahkan pengaman salah-mode berbasis `BOPEL_SCAN_MODE` di `scan.py` & `launcher.py`, dan memperbarui seluruh unit test.
-- **File Data Bulanan**: Mempertahankan file `hasil_scan_bulanan*.xlsx` & `checkpoint_scan_bulanan.xlsx` di disk untuk keputusan user.
-
-### Sesi 2026-11-03 (Sesi Sebelumnya) — Penghapusan Textual & E2E Lolos
-- Penghapusan total UI Textual lama (`main.py`, `ui/`, `start_tui.bat`, `mcp/bopel_ui_tester`). E2E nyata Screenshot Iklan & Fetch dikonfirmasi user **LOLOS**.
-
-### Sesi 2026-11-02 — Retur `scan.py`
-- Porting deteksi retur Excel income ke `scan.py` sehingga retur tanpa faktur tercatat `RETUR`, bukan `TIDAK ADA FAKTUR`.
-
----
-
-## 5. KNOWN ISSUES & CATATAN PENTING
-
-1. **Tab baru Chrome**: Setiap kali `Start` dijalankan untuk tool toko, Chrome membuka tab baru (tab Shopee/iklan menumpuk). Belum ditangani penutupan tab otomatis.
-2. **File Data Bulanan**: `hasil_scan_bulanan.xlsx`, `hasil_scan_bulanan_1.xlsx`, dan `checkpoint_scan_bulanan.xlsx` tetap tersimpan di root proyek sebagai arsip/data historis user.
+# LAPORAN_PROYEK.md (Entry 2026-11-04 - SPA & Caption Feature)
+## Pemulihan UI SPA & Fitur Caption
+- Mengembalikan `app.py`, `web/index.html`, `web/style.css`, `web/app.js`.
+- Menambahkan tombol "Copy Caption" pada preview card Screenshot Iklan di `web/app.js`.
+- `core/caption.py` diperbarui formatnya menjadi `Shopee Ads <Nama Toko> <Tanggal>`.
+- 7/7 tes lulus.

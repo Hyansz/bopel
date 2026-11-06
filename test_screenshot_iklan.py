@@ -101,25 +101,31 @@ check("order bottom>top", box_odd[3] > box_odd[1], True)
 
 # ── bangun_teks_caption ──────────────────────────────────────────────
 print("bangun_teks_caption:")
+from datetime import datetime
+today_str = datetime.now().strftime("%m %d %Y")
 cap1 = bangun_teks_caption(["Toko A", {"name": "Toko B"}, ""])
-check("caption format & order", cap1, "Shopee Ads [Toko A]\nShopee Ads [Toko B]")
+check("caption format & order", cap1, f"Shopee Ads Toko A {today_str}\nShopee Ads Toko B {today_str}")
 
 # ── LABEL_DI_GAMBAR & _apply_label_to_image ──────────────────────────
 print("LABEL_DI_GAMBAR:")
 import screenshot_iklan as si
 from pathlib import Path
 from PIL import Image
+import tempfile
+import shutil
+from pathlib import Path
+from PIL import Image
+import screenshot_iklan as si
 si.LABEL_DI_GAMBAR = True
-tmp_img = Path("logs/screenshots/iklan/_test_label.png")
-tmp_img.parent.mkdir(parents=True, exist_ok=True)
-img_base = Image.new("RGB", (100, 100), (255, 255, 255))
-img_base.save(tmp_img)
-si._apply_label_to_image(tmp_img, "Toko Test")
-img_res = Image.open(tmp_img)
-img_res.close()
-check("label height increased", img_res.size[1] > 100, True)
-if tmp_img.exists():
-    tmp_img.unlink()
+with tempfile.TemporaryDirectory() as tmpdir:
+    tmp_dir_path = Path(tmpdir)
+    tmp_img = tmp_dir_path / "_test_label.png"
+    img_base = Image.new("RGB", (100, 100), (255, 255, 255))
+    img_base.save(tmp_img)
+    si._apply_label_to_image(tmp_img, "Toko Test")
+    img_res = Image.open(tmp_img)
+    img_res.close()
+    check("label height increased", img_res.size[1] > 100, True)
 si.LABEL_DI_GAMBAR = False
 
 
@@ -172,8 +178,7 @@ with mock.patch("screenshot_iklan.Config.stores", return_value=stores_mock), \
      mock.patch("time.sleep", return_value=None), \
      mock.patch("win32gui.GetWindowRect", return_value=(0, 0, 1448, 876)), \
      mock.patch("win32gui.MoveWindow"), \
-     mock.patch("win32gui.IsIconic", return_value=False), \
-     mock.patch("sys.stdout", autospec=True):
+     mock.patch("win32gui.IsIconic", return_value=False):
     
     try:
         active_windows.clear()
