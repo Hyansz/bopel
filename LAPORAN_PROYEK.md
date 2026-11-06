@@ -1,4 +1,49 @@
-# Session Report — 2026-11-06
+# Session Report — 2026-11-06 (UI Polish MVP v1.1.0)
+
+## Ringkasan
+- Memoles UI Pywebview SPA BOPEL menjadi antarmuka modern profesional (versi config dinaikkan ke `1.1.0`).
+- Menyempurnakan tata letak sidebar (dengan ikon SVG & indikator status berjalan), header tunggal ramping, kontrol segmented mode, kartu metrik horizontal dengan angka tabular-nums, panel log dengan auto-scroll & tombol salin log, serta pratinjau thumbnail screenshot iklan dengan chip hotkey (`Ctrl+Alt+V`).
+- Memperbarui skrip pengujian visual `shot_spa.py` untuk mengambil tangkapan layar otomatis seluruh halaman SPA dalam mode `BOPEL_PYWEBVIEW_DRY_RUN=1` ke `screenshots_spa/v2/`.
+- Mempertahankan seluruh kontrak JS↔Python dan logika backend/makro/clipboard tanpa perubahan.
+
+## Daftar Kontrak JS<->Python (Metode Bridge `Api` & Pushing)
+- Method dipanggil JS via `window.pywebview.api.*`:
+  - `get_config()` -> dict
+  - `start_tool(script, run_key)` -> dict
+  - `stop_tool(script)` -> dict
+  - `set_active_store(name, start_date, end_date)` -> dict
+  - `copy_text(text)` -> dict
+  - `copy_files(paths_json)` -> dict
+  - `get_logs()` -> list[str]
+  - `get_system_info()` -> dict
+  - `get_settings_info()` -> dict
+  - `exit_app()` -> None
+- Push / Callback JS dari Python via `_push_js` (`evaluate_js`):
+  - `appendLogLine(runKey, line)`
+  - `updateSummaryCards(runKey, snapshot)`
+  - `onToolStarted(runKey)`
+  - `onToolFinished(runKey, success, error, banner)`
+  - `pushItems(runKey, items)`
+  - `showScreenshotPreviews(runKey, items)`
+
+## Keputusan Desain Ringkas
+- Palet: Dark warehouse theme dengan 3 tingkat permukaan (`--bg-0`, `--bg-1`, `--bg-2`), garis pembatas alfa tipis, aksen oranye hangat BOPEL (`--amber`), dan warna semantik sukses/error yang jelas.
+- Tipografi: Space Grotesk (Judul), Inter (Body), JetBrains Mono (Angka & Log).
+- Animasi: Mikro-transisi transform & opacity 120-250ms ease-out, dot status berdenyut halus, hormati `prefers-reduced-motion`.
+
+## Status Pengujian & Visual Testing
+- Screenshot SPA berhasil ditangkap ke `screenshots_spa/v2/` (`02_dashboard.png`, `03_logs.png`, `04_settings.png`, `04_checklist_otomatis.png`, `10_checklist_otomatis_running.png`, `11_checklist_otomatis_selesai.png`, `05_screenshot_iklan.png`, `12_screenshot_iklan_selesai.png`, `06_inventory_scan_kode_pesanan.png`) dengan warna unik >50.
+- Test suite pytest: **11/11 passed**.
+- `node --check web/app.js`: OK (0 error).
+- `python -c "import app"`: OK (0 error).
+- Folder `logs/screenshots/iklan/` bersih dari artefak tes baru.
+
+## Yang Belum Terbukti
+- Tampilan nyata di layar pengguna dan sensasi fisik animasi — memerlukan pengujian interaktif langsung.
+
+---
+
+
 
 ## Ringkasan
 Fix bug selector `pilih_screenshot_paste()` yang menolak semua file nyata karena perbandingan

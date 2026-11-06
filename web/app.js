@@ -34,12 +34,18 @@ let dataMode = null;
 function renderSidebar(tools) {
   const box = $("#sidebar-tools");
   box.innerHTML = "";
+  const icons = {
+    "check.py": '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>',
+    "screenshot_iklan.py": '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>',
+    "scan.py": '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"></path><path d="M9 20h6"></path><path d="M12 4v16"></path></svg>'
+  };
   for (const t of tools) {
     const btn = document.createElement("button");
     btn.className = "sb-item";
     btn.dataset.nav = "tool";
     btn.dataset.script = t.script;
-    btn.textContent = t.name;
+    const iconSvg = icons[t.script] || '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>';
+    btn.innerHTML = `<span class="sb-icon">${iconSvg}</span><span>${t.name}</span>`;
     box.appendChild(btn);
   }
 }
@@ -419,17 +425,35 @@ function renderScreenshotPreview(st) {
   const show = !!(items.length && currentTool && (currentTool.script === "screenshot_iklan.py"));
   box.classList.toggle("hidden", !show);
   if (!show) return;
-  box.innerHTML = "";
+  box.innerHTML = `<div class="shot-paste-hint"><span>📌 Hotkey global aktif:</span><span class="hotkey-chip">Ctrl+Alt+V</span><span>tempel 3 gambar + caption otomatis</span></div>`;
   for (const it of items) {
     const name = it.path ? it.path.split(/[\\/]/).pop() : "screenshot";
     const card = document.createElement("div");
     card.className = "shot-card";
     card.innerHTML = `<span class="shot-card-title"></span>
       <img class="shot-thumb" alt="Preview screenshot iklan">
-      <span class="shot-path"></span>`;
+      <span class="shot-path"></span>
+      <button class="btn sm copy-caption" style="margin-top:6px; background:#007acc; color:#fff; border:none; padding:4px 8px; border-radius:3px; cursor:pointer;">Copy Caption</button>`;
     card.querySelector(".shot-card-title").textContent = name;
     card.querySelector(".shot-thumb").src = it.uri || "";
     card.querySelector(".shot-path").textContent = it.path || "";
+    const capBtn = card.querySelector(".copy-caption");
+    capBtn.addEventListener("click", async () => {
+      const storeName = name.replace(/_\d{4}_sd_\d{4}\.png$/, "").replace(/_/g, " ");
+      const now = new Date();
+      const dd = String(now.getDate()).padStart(2, "0");
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const yyyy = now.getFullYear();
+      const caption = `Shopee Ads ${storeName} ${dd}/${mm}/${yyyy}`;
+      const api = bridgeApi();
+      if (api && typeof api.copy_text === "function") {
+        const res = await api.copy_text(caption);
+        if (res && res.ok) {
+          capBtn.textContent = "Copied ✓";
+          setTimeout(() => capBtn.textContent = "Copy Caption", 1500);
+        }
+      }
+    });
     box.appendChild(card);
   }
 }

@@ -1,6 +1,6 @@
 app:
   name: Bopel Automation Toolkit
-  version: "1.0.0"
+  version: "1.1.0"
   subtitle: Internal Warehouse Utilities
 
 tools:
@@ -23,6 +23,7 @@ tools:
     description: Screenshot chart dashboard iklan Shopee per toko & rentang tanggal
     uses_stores: true
     date_range: true
+    caption_di_gambar: false
 
   - name: Inventory Scanner
     script: scan.py
@@ -71,6 +72,15 @@ stores:
     akun: alkesmedikasolo
     chrome_user_data_dir: C:\Users\PC\AppData\Local\Google\Chrome\User Data
     profile_directory: Profile 9
+
+paste_macro:
+  hotkey: "Ctrl+Alt+V"
+  hotkey_cadangan:
+    - "Ctrl+Alt+Shift+V"
+    - "Ctrl+Shift+F9"
+  enabled: true
+  delay_setelah_gambar: 1.5
+  delay_antar_toko: 1.0
 
 logging:
   level: INFO
