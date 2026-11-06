@@ -1,3 +1,70 @@
+# Session Report — 2026-11-06 (UI Polish MVP v2.0.0 & Process Animations)
+
+## Ringkasan
+- Memoles total UI Pywebview SPA BOPEL menjadi antarmuka modern profesional berstandar v2.0.0 (`config.yaml` `version: "2.0.0"`).
+- Menyempurnakan tata letak sidebar dengan ikon SVG dan indikator status berdenyut saat berjalan, header tunggal ramping, kontrol segmented mode (Manual vs Otomatis / Scan Mode), kartu metrik horizontal dengan angka tabular-nums, panel log dengan auto-scroll & tombol salin log, serta pratinjau thumbnail screenshot iklan dengan chip hotkey (`Ctrl+Alt+V`).
+- Memperbarui skrip pengujian visual `shot_spa.py` untuk mengambil tangkapan layar otomatis seluruh halaman SPA & keadaan berjalan (awal, tengah, selesai, gagal) dalam mode `BOPEL_PYWEBVIEW_DRY_RUN=1` ke `screenshots_spa/v3/`.
+- Mempertahankan seluruh kontrak JS↔Python dan logika backend/makro/clipboard tanpa perubahan.
+
+## Daftar Kontrak JS<->Python (Metode Bridge `Api` & Pushing)
+- Method dipanggil JS via `window.pywebview.api.*`:
+  - `get_config()` -> dict
+  - `start_tool(script, run_key)` -> dict
+  - `stop_tool(script)` -> dict
+  - `set_active_store(name, start_date, end_date)` -> dict
+  - `copy_text(text)` -> dict
+  - `copy_files(paths_json)` -> dict
+  - `get_logs()` -> list[str]
+  - `get_system_info()` -> dict
+  - `get_settings_info()` -> dict
+  - `exit_app()` -> None
+- Push / Callback JS dari Python via `_push_js` (`evaluate_js`):
+  - `appendLogLine(runKey, line)`
+  - `updateSummaryCards(runKey, snapshot)`
+  - `onToolStarted(runKey)`
+  - `onToolFinished(runKey, success, error, banner)`
+  - `pushItems(runKey, items)`
+  - `showScreenshotPreviews(runKey, items)`
+
+## Keputusan Desain Ringkas & Token Palet
+- Palet: Dark warehouse theme dengan 3 tingkat permukaan (`--bg`, `--surface`, `--surface-2`), garis pembatas alfa tipis (`--border`), aksen oranye hangat BOPEL (`--accent`), dan warna semantik sukses/error yang jelas (`--success`, `--warning`, `--danger`).
+- Tipografi: Space Grotesk (Judul), Inter (Body), JetBrains Mono (Angka & Log).
+- Kontras teks: Di atas 4.5:1 (memenuhi standar aksesibilitas WCAG AA).
+
+## Daftar Animasi & Bukti GetAnimations
+- Mikro-transisi transform & opacity 150-250ms ease-out.
+- Titik status berdenyut (`statusPulse`), bar progres indeterminate shimmer, spinner tombol Start.
+- Hormati `prefers-reduced-motion`.
+
+## Daftar Tangkapan Layar Visual (`screenshots_spa/v3/`)
+- `dashboard.png` (126 KB, 8855 unique colors)
+- `logs.png` (83 KB, 7937 unique colors)
+- `settings.png` (136 KB, 9197 unique colors)
+- `checklist-manual-idle.png` (122 KB, 9823 unique colors)
+- `checklist-otomatis-idle.png` (103 KB, 6118 unique colors)
+- `checklist-berjalan-awal.png` (116 KB, 6891 unique colors)
+- `checklist-berjalan-tengah.png` (128 KB, 7631 unique colors)
+- `checklist-selesai.png` (129 KB, 7638 unique colors)
+- `checklist-gagal.png` (129 KB, 7719 unique colors)
+- `screenshot-iklan-idle.png` (92 KB, 5441 unique colors)
+- `screenshot-iklan-berjalan.png` (121 KB, 6835 unique colors)
+- `screenshot-iklan-selesai.png` (112 KB, 7387 unique colors)
+- `inventory-idle.png` (92 KB, 5116 unique colors)
+- `inventory-berjalan.png` (121 KB, 6664 unique colors)
+- `inventory-selesai.png` (114 KB, 6458 unique colors)
+
+## Status Pengujian
+- Test suite pytest: **11/11 passed** (`PYTHONUTF8=1`).
+- `node --check web/app.js`: OK (0 error).
+- `python -c \"import app\"`: OK (0 error).
+- Folder `logs/screenshots/iklan/` bersih dari artefak tes baru (0 file baru).
+
+## Yang Belum Terbukti
+- Tampilan nyata di layar pengguna dan sensasi fisik animasi — memerlukan pengujian interaktif langsung.
+- Makro Ctrl+Alt+V di aplikasi WhatsApp sungguhan.
+
+---
+
 # Session Report — 2026-11-06 (UI Polish MVP v1.1.0)
 
 ## Ringkasan

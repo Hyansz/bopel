@@ -1,5 +1,5 @@
-"""Skrip untuk mengambil screenshot SPA pywebview per halaman secara otomatis.
-Dijalankan dalam mode dry-run (BOPEL_PYWEBVIEW_DRY_RUN=1).
+"""Skrip untuk mengambil screenshot SPA pywebview per halaman secara otomatis (v2.0.0).
+Dijalankan dalam mode dry-run (BOPEL_PYWEBVIEW_DRY_RUN=1) ke screenshots_spa/v3/.
 """
 
 from __future__ import annotations
@@ -9,10 +9,8 @@ import time
 import threading
 from pathlib import Path
 
-# WAJIB mode simulasi
 os.environ["BOPEL_PYWEBVIEW_DRY_RUN"] = "1"
 
-# Set DPI awareness
 try:
     import ctypes
     ctypes.windll.shcore.SetProcessDpiAwareness(2)
@@ -29,14 +27,8 @@ from app import Api
 from core.launcher_cb import ToolLauncher
 from core.window import find_target_window, activate_window
 
-OUT_DIR = Path("C:/robot/bopel/screenshots_spa/v2")
+OUT_DIR = Path("C:/robot/bopel/screenshots_spa/v3")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-pages = [
-    ("02_dashboard", "dashboard"),
-    ("03_logs", "logs"),
-    ("04_settings", "settings"),
-]
 
 def count_unique_colors(img_path: Path) -> int:
     try:
@@ -49,7 +41,7 @@ def count_unique_colors(img_path: Path) -> int:
         return 0
 
 def capture_window_rect(filename: str) -> bool:
-    time.sleep(1.2)  # tunggu animasi / render halaman
+    time.sleep(1.2)
     hwnds = find_target_window("Bopel Automation Toolkit")
     if not hwnds:
         print(f"Window tidak ditemukan untuk {filename}")
@@ -74,84 +66,123 @@ def capture_window_rect(filename: str) -> bool:
         return False
 
 def automation_sequence(window):
-    # Tunggu sebentar agar pywebviewready / DOM load selesai
     time.sleep(2.0)
     
-    # 1. Dashboard, Logs, Settings
-    for filename, nav_name in pages:
-        print(f"Navigasi ke {nav_name}...")
-        script = f"""
-        (function() {{
-            const btn = document.querySelector('.sb-item[data-nav="{nav_name}"]');
-            if (btn) {{ btn.click(); return true; }}
-            return false;
-        }})();
-        """
-        try:
-            window.evaluate_js(script)
-        except Exception as e:
-            print(f"Evaluasi JS gagal untuk {nav_name}: {e}")
-        capture_window_rect(filename)
+    # 1. dashboard
+    print("Navigasi ke dashboard...")
+    window.evaluate_js("document.querySelector('.sb-item[data-nav=\"dashboard\"]')?.click();")
+    capture_window_rect("dashboard")
 
-    # 2. Tools (Checklist Automation / check.py, dll.)
-    # Ambil tools dari sidebar button dengan data-nav="tool"
-    print("Navigasi ke tools...")
-    script_tools = """
-    Array.from(document.querySelectorAll('.sb-item[data-nav="tool"]')).map(el => ({
-        script: el.getAttribute('data-script'),
-        text: el.textContent.trim()
-    }))
-    """
-    try:
-        tools_info = window.evaluate_js(script_tools)
-        print(f"Ditemukan tools: {tools_info}")
-    except Exception as e:
-        print(f"Gagal ambil tools: {e}")
-        tools_info = []
+    # 2. logs
+    print("Navigasi ke logs...")
+    window.evaluate_js("document.querySelector('.sb-item[data-nav=\"logs\"]')?.click();")
+    capture_window_rect("logs")
 
-    # Map tools to expected output filenames
-    # 03_checklist_manual, 04_checklist_otomatis, 05_screenshot_iklan, 06_inventory_scan_kode_pesanan, 07_inventory_scan_detail
-    tool_map = {
-        "check.py": "04_checklist_otomatis",
-        "screenshot_iklan.py": "05_screenshot_iklan",
-        "scan.py": "06_inventory_scan_kode_pesanan",
-    }
+    # 3. settings
+    print("Navigasi ke settings...")
+    window.evaluate_js("document.querySelector('.sb-item[data-nav=\"settings\"]')?.click();")
+    capture_window_rect("settings")
 
-    for t in tools_info:
-        script = t["script"]
-        print(f"Klik tool script: {script}")
-        click_script = f"""
-        (function() {{
-            const btn = document.querySelector('.sb-item[data-nav="tool"][data-script="{script}"]');
-            if (btn) {{ btn.click(); return true; }}
-            return false;
-        }})();
-        """
-        window.evaluate_js(click_script)
-        time.sleep(1.0)
-        
-        # Tentukan nama file screenshot
-        fname = tool_map.get(script, f"tool_{script.replace('.py', '')}")
-        capture_window_rect(fname)
+    # 4. checklist-manual-idle & checklist-otomatis-idle & running & selesai & gagal
+    print("Navigasi ke Checklist Automation...")
+    window.evaluate_js("document.querySelector('.sb-item[data-nav=\"tool\"][data-script=\"check.py\"]')?.click();")
+    time.sleep(0.5)
+    capture_window_rect("checklist-manual-idle")
 
-        # Jika tool adalah check.py (checklist otomatis), jalankan simulasi run
-        if script == "check.py":
-            print("Simulasi Start Checklist Otomatis...")
-            window.evaluate_js('document.getElementById("btn-start-checklist-otomatis")?.click();')
-            time.sleep(1.0)
-            capture_window_rect("10_checklist_otomatis_running")
-            print("Menunggu simulasi selesai...")
-            time.sleep(3.5)
-            capture_window_rect("11_checklist_otomatis_selesai")
+    print("Pilih mode otomatis di Checklist...")
+    window.evaluate_js("""
+    (function(){
+        const btns = document.querySelectorAll('#data-mode-btns .btn.choice');
+        for (const b of btns) { if (b.textContent.trim() === 'Otomatis') { b.click(); break; } }
+    })();
+    """)
+    time.sleep(0.5)
+    capture_window_rect("checklist-otomatis-idle")
 
-        # Jika tool adalah screenshot_iklan.py, jalankan simulasi run
-        if script == "screenshot_iklan.py":
-            print("Simulasi Start Screenshot Iklan...")
-            window.evaluate_js('document.getElementById("btn-start-screenshot-iklan")?.click();')
-            time.sleep(4.0)
-            capture_window_rect("12_screenshot_iklan_selesai")
+    print("Mulai Checklist Automation (berjalan)...")
+    window.evaluate_js("document.getElementById('start-btn')?.click();")
+    time.sleep(0.6)
+    capture_window_rect("checklist-berjalan-awal")
+    time.sleep(1.2)
+    capture_window_rect("checklist-berjalan-tengah")
 
-    print("Semua screenshot SPA selesai diambil!")
+    print("Menunggu checklist selesai...")
+    time.sleep(2.5)
+    capture_window_rect("checklist-selesai")
+
+    print("Simulasi Checklist Gagal...")
+    window.evaluate_js("""
+    (function(){
+        const key = 'check.py';
+        if (typeof onToolFinished === 'function') {
+            onToolFinished(key, false, 'Gagal koneksi shopee', 'Gagal validasi');
+        }
+    })();
+    """)
+    time.sleep(0.5)
+    capture_window_rect("checklist-gagal")
+
+    # 5. Screenshot Iklan
+    print("Navigasi ke Screenshot Iklan...")
+    window.evaluate_js("document.querySelector('.sb-item[data-nav=\"tool\"][data-script=\"screenshot_iklan.py\"]')?.click();")
+    time.sleep(0.5)
+    capture_window_rect("screenshot-iklan-idle")
+
+    print("Mulai Screenshot Iklan (berjalan)...")
+    window.evaluate_js("document.getElementById('start-btn')?.click();")
+    time.sleep(1.2)
+    capture_window_rect("screenshot-iklan-berjalan")
+
+    print("Menunggu Screenshot Iklan selesai...")
+    window.evaluate_js("""
+    (function(){
+        const key = 'screenshot_iklan.py';
+        if (typeof onToolFinished === 'function') {
+            onToolFinished(key, true, '', 'Berhasil screenshot 3 toko');
+            if (typeof showScreenshotPreviews === 'function') {
+                showScreenshotPreviews(key, [
+                    { path: 'logs/screenshots/iklan/Toko_1_Toko_Alkes_Solo.png', uri: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' },
+                    { path: 'logs/screenshots/iklan/Toko_2_Toko_Alkes_BSM.png', uri: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' }
+                ]);
+            }
+        }
+    })();
+    """)
+    time.sleep(1.0)
+    capture_window_rect("screenshot-iklan-selesai")
+
+    # 6. Inventory Scanner
+    print("Navigasi ke Inventory Scanner...")
+    window.evaluate_js("document.querySelector('.sb-item[data-nav=\"tool\"][data-script=\"scan.py\"]')?.click();")
+    time.sleep(0.5)
+    capture_window_rect("inventory-idle")
+
+    print("Mulai Inventory Scanner (berjalan)...")
+    window.evaluate_js("""
+    (function(){
+        const btns = document.querySelectorAll('#mode-btns .btn.choice');
+        if (btns.length) btns[0].click();
+    })();
+    """)
+    time.sleep(1.2)
+    capture_window_rect("inventory-berjalan")
+
+    print("Menunggu Inventory Scanner selesai...")
+    window.evaluate_js("""
+    (function(){
+        const key = 'scan.py::Scan Kode Pesanan';
+        if (typeof onToolFinished === 'function') {
+            onToolFinished(key, true, '', 'Scan selesai');
+            if (typeof updateSummaryCards === 'function') {
+                updateSummaryCards(key, { total: 10, ok: 10, beda: 0, notfound: 0, durasi: '1.2' });
+            }
+        }
+    })();
+    """)
+    time.sleep(1.0)
+    capture_window_rect("inventory-selesai")
+
+    print("Semua screenshot SPA v3 selesai diambil!")
     time.sleep(1.0)
     window.destroy()
 
@@ -162,8 +193,8 @@ def main():
         "Bopel Automation Toolkit",
         str(_WEB_INDEX),
         js_api=api,
-        width=1180,
-        height=760,
+        width=1220,
+        height=780,
         min_size=(900, 600),
         resizable=True,
     )
