@@ -7,7 +7,6 @@ import sys
 
 from core import window
 from core.config import Config
-from core.observ import simpan_metrik
 import bsm_match
 
 UI_MODE = os.environ.get("BOPEL_UI_MODE") == "1"
@@ -18,6 +17,7 @@ FAST = 0.12
 CODE_PATTERN = re.compile(r'\b26[A-Z0-9]{12,13}\b')
 CLIP_SENTINEL = "__CLIP_EMPTY_SENTINEL__"
 STEP1_ONLY = True  # Step 1 only per instructions: parse and report, do not check/click
+BSM_WAIT_AFTER_OPEN = 5.0  # detik tunggu setelah buka .lnk
 
 
 def safe_copy(delay=FAST, retries=4, settle=0.05, metrik=None):
@@ -52,6 +52,14 @@ def parse_shopee_prices(raw_text, target_codes):
     return result
 
 
+def bsm_window_exists() -> bool:
+    """True bila window berjudul 'Inventory BSM' sudah ada (visible), False bila tidak/pywin32 tidak ada."""
+    try:
+        return window.find_target_window("Inventory BSM") is not None
+    except RuntimeError:
+        return False
+
+
 def open_bsm_shortcut():
     Config.ensure_loaded()
     shortcut_path = ""
@@ -71,76 +79,93 @@ def open_bsm_shortcut():
         return False
 
 
-print("=" * 50)
-print("BOT VALIDASI + AUTO CHECKLIST (INVENTORY BSM - WEB APP)")
-print("=" * 50)
+def main():
+    print("=" * 50)
+    print("BOT VALIDASI + AUTO CHECKLIST (INVENTORY BSM - WEB APP)")
+    print("=" * 50)
 
-if UI_MODE:
-    print(f"\nSTEP 1:\nPastikan data Shopee sudah dicopy. Membaca dalam {GRACE_PASTE_DATA} detik...")
-    time.sleep(GRACE_PASTE_DATA)
-else:
-    input("\nSTEP 1:\nCopy data Shopee → ENTER...\n")
+    if UI_MODE:
+        print(f"\nSTEP 1:\nPastikan data Shopee sudah dicopy. Membaca dalam {GRACE_PASTE_DATA} detik...")
+        time.sleep(GRACE_PASTE_DATA)
+    else:
+        input("\nSTEP 1:\nCopy data Shopee → ENTER...\n")
 
-raw = pyperclip.paste()
-if not raw.strip():
-    print("❌ Clipboard kosong!")
-    sys.exit(1)
+    raw = pyperclip.paste()
+    if not raw.strip():
+        print("❌ Clipboard kosong!")
+        sys.exit(1)
 
-orders = CODE_PATTERN.findall(raw)
-orders = list(dict.fromkeys(orders))
-if not orders:
-    print("❌ Tidak ada kode pesanan Shopee ditemukan di clipboard.")
-    sys.exit(1)
+    orders = CODE_PATTERN.findall(raw)
+    orders = list(dict.fromkeys(orders))
+    if not orders:
+        print("❌ Tidak ada kode pesanan Shopee ditemukan di clipboard.")
+        sys.exit(1)
 
-print(f"\nTotal order Shopee terbaca: {len(orders)}")
-shopee_prices = parse_shopee_prices(raw, set(orders))
-pyperclip.copy("")
+    print(f"\nTotal order Shopee terbaca: {len(orders)}")
+    shopee_prices = parse_shopee_prices(raw, set(orders))
+    pyperclip.copy("")
 
-print("\nSTEP 2:")
-open_bsm_shortcut()
-time.sleep(3.0)
+    print("\nSTEP 2:")
+    if bsm_window_exists():
+        print("Inventory BSM sudah terbuka, memakai window yang ada.")
+    else:
+        print("Inventory BSM belum terbuka, membuka lewat shortcut...")
+        open_bsm_shortcut()
+        deadline = time.monotonic() + 30.0
+        found_opened = False
+        while time.monotonic() < deadline:
+            if bsm_window_exists():
+                found_opened = True
+                break
+            time.sleep(0.5)
+        if not found_opened:
+            print("❌ Gagal: Window 'Inventory BSM' tidak kunjung muncul setelah membuka shortcut.")
+            sys.exit(1)
+        print(f"Menunggu {BSM_WAIT_AFTER_OPEN} detik agar halaman siap...")
+        time.sleep(BSM_WAIT_AFTER_OPEN)
 
-hwnd = window.persiapkan_window_target(SCRIPT_NAME, required=UI_MODE)
-print("Mengambil data halaman BSM via Ctrl+A...")
+    hwnd = window.persiapkan_window_target(SCRIPT_NAME, required=UI_MODE)
+    print("Mengambil data halaman BSM via Ctrl+A...")
 
-if UI_MODE:
-    time.sleep(2)
-else:
-    input("Klik area netral di halaman BSM, lalu ENTER...")
+    if UI_MODE:
+        time.sleep(2)
+    else:
+        input("Klik area netral di halaman BSM, lalu ENTER...")
 
-pyautogui.hotkey('ctrl', 'a')
-time.sleep(0.3)
-bsm_raw = safe_copy(delay=0.3, retries=5)
-pyautogui.press('esc')
+    pyautogui.hotkey('ctrl', 'a')
+    time.sleep(0.3)
+    bsm_raw = safe_copy(delay=0.3, retries=5)
+    pyautogui.press('esc')
 
-if not bsm_raw:
-    print("❌ Gagal menyalin halaman BSM dari clipboard.")
-    sys.exit(1)
+    if not bsm_raw:
+        print("❌ Gagal menyalin halaman BSM dari clipboard.")
+        sys.exit(1)
 
-# Simpan teks hasil Ctrl+A ke logs\bsm_ctrla_last.txt untuk debugging
-os.makedirs("logs", exist_ok=True)
-with open(r"logs\bsm_ctrla_last.txt", "w", encoding="utf-8") as f:
-    f.write(bsm_raw)
+    os.makedirs("logs", exist_ok=True)
+    with open(r"logs\bsm_ctrla_last.txt", "w", encoding="utf-8") as f:
+        f.write(bsm_raw)
 
-# Match codes with bsm_match
-res = bsm_match.match_codes(orders, bsm_raw)
-bsm_match.print_report(res)
+    res = bsm_match.match_codes(orders, bsm_raw)
+    bsm_match.print_report(res)
 
-# Cetak baris ringkasan dengan label yang dipahami launcher untuk kartu metrik UI
-total_n = res["total_baris_app"]
-cocok_n = len(res["found"])
-tidak_n = len(res["missing"])
-print(f"Total: {total_n}")
-print(f"Ketemu: {cocok_n} / {total_n}")
-print(f"Sudah: {cocok_n}")
-print(f"Beda: 0")
-print(f"Tidak: {tidak_n}")
-print(f"Waktu: 1.00 detik")
+    total_n = res["total_baris_app"]
+    cocok_n = len(res["found"])
+    tidak_n = len(res["missing"])
+    print("Total:", total_n)
+    print("Ketemu:", cocok_n, "/", total_n)
+    print("Sudah:", cocok_n)
+    print("Beda: 0")
+    print("Tidak:", tidak_n)
+    print("Waktu: 1.00 detik")
 
-if res["parser_problems"] or total_n == 0:
-    print("❌ Ctrl+A tidak terbaca sebagai tabel Inventory BSM; pastikan halaman Tambah Bayar Customer terbuka dan fokus ada di area netral.")
-    sys.exit(1)
+    if res["parser_problems"] or total_n == 0:
+        print("❌ Ctrl+A tidak terbaca sebagai tabel Inventory BSM; pastikan halaman Tambah Bayar Customer terbuka dan fokus ada di area netral.")
+        sys.exit(1)
 
-if STEP1_ONLY:
-    print("\n✔ STEP 1 Selesai (STEP1_ONLY = True): Sesuai instruksi, skrip berhenti setelah laporan pencocokan.")
-    sys.exit(0)
+    if STEP1_ONLY:
+        print("\n✔ STEP 1 Selesai (STEP1_ONLY = True): Sesuai instruksi, skrip berhenti setelah laporan pencocokan.")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

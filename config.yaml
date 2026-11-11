@@ -18,6 +18,13 @@ tools:
     # diverifikasi kompatibel 2026-08-19, lihat logs/session_report.md).
     uses_stores: true
 
+  - name: Checklist Automation - New
+    script: check_new.py
+    description: Checklist pesanan dan validasi harga Shopee vs aplikasi (Inventory BSM)
+    target_window_title: Inventory BSM
+    uses_stores: true
+    shortcut: C:\Users\PC\Desktop\Inventory BSM.lnk
+
   - name: Screenshot Iklan
     script: screenshot_iklan.py
     description: Screenshot chart dashboard iklan Shopee per toko & rentang tanggal
