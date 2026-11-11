@@ -18,8 +18,8 @@ FAST = 0.12
 CODE_PATTERN = re.compile(r'\b26[A-Z0-9]{12,13}\b')
 CLIP_SENTINEL = "__CLIP_EMPTY_SENTINEL__"
 
-STEP1_ONLY = True                  # Step 1 only per instructions: parse and report, do not click
-STEP2_MODE = "off"                 # "off" | "click_test" | "dry" | "live"
+STEP1_ONLY = False                 # Diaktifkan live per konfirmasi user
+STEP2_MODE = "live"                # "off" | "click_test" | "dry" | "live"
 STEP2_MAX_TICKS = None             # None = all; int limit centang buat uji
 BSM_FIRST_ROW_CLICK = (0.768, 0.591)  # (x_ratio, y_ratio) relatif ke window, dari config.yaml
 BSM_KEY_DELAY = 0.12               # detik antar tekanan "down"
@@ -183,6 +183,7 @@ def main():
     print("Waktu: 1.00 detik")
 
     if res["parser_problems"] or total_shopee == 0:
+        print(f"DEBUG: parser_problems={res['parser_problems']}, total_shopee={total_shopee}")
         print("❌ Ctrl+A tidak terbaca sebagai tabel Inventory BSM; pastikan halaman Tambah Bayar Customer terbuka dan fokus ada di area netral.")
         sys.exit(1)
 
