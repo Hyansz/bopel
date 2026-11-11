@@ -4,6 +4,14 @@ app:
   subtitle: Internal Warehouse Utilities
 
 tools:
+  - name: Checklist Automation - New
+    script: check_new.py
+    description: Checklist pesanan dan validasi harga Shopee vs aplikasi (Inventory BSM)
+    target_window_title: Inventory BSM
+    uses_stores: true
+    shortcut: C:\Users\PC\Desktop\Inventory BSM.lnk
+    bsm_first_row_click: [0.768, 0.591]
+
   - name: Checklist Automation
     script: check.py
     description: Checklist pesanan dan validasi harga Shopee vs aplikasi
@@ -17,13 +25,6 @@ tools:
     # check.py STEP 1 (kode via regex + harga Shopee dari blok per kode —
     # diverifikasi kompatibel 2026-08-19, lihat logs/session_report.md).
     uses_stores: true
-
-  - name: Checklist Automation - New
-    script: check_new.py
-    description: Checklist pesanan dan validasi harga Shopee vs aplikasi (Inventory BSM)
-    target_window_title: Inventory BSM
-    uses_stores: true
-    shortcut: C:\Users\PC\Desktop\Inventory BSM.lnk
 
   - name: Screenshot Iklan
     script: screenshot_iklan.py
