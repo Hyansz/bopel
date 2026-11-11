@@ -1,754 +1,478 @@
 /* ═══════════════════════════════════════════════════════════════════
-   BOPEL Automation Toolkit — pywebview UI
-   Redesign "Opsi B — Toolbar + Split" (2026-08-20, layout final):
-   tetap dark warehouse theme + satu aksen amber + font lokal; toolbar
-   Satu Baris (.toolbar, bg-1 + border tipis) berisi kontrol mode kiri +
-   Start/Stop rata kanan (.tb-spacer); layar tool = grid 2 kolom (.split):
-   kiri sempit (status pill + progress + summary 2x3), kanan lebar (copy-bar
-   + log). Dashboard = strip toolbar metrik + 2 card; Settings = 3 card
-   horizontal. Tombol pilihan (.btn.choice) dibedakan dari aksi utama
-   (Start = SATU-SATUNYA amber solid); skala spacing/font di-token.
-   Palet sinkron ui/theme.py (Textual) — kalau palet berubah, ubah KEDUA
-   file sekaligus.
+   BOPEL Automation Toolkit 2.0 — pywebview UI
+   Dark, tiga tingkat permukaan (bg → surface → surface-2), satu aksen
+   oranye hangat, warna semantik hanya untuk status. Font lokal.
+   Animasi proses = transform + opacity saja; prefers-reduced-motion
+   mematikan gerak (perubahan warna/teks tetap).
    ═══════════════════════════════════════════════════════════════════ */
 
-/* ── Font lokal (di-bundle, tanpa CDN) ──────────────────────────────
-   Satu file variable-font per family dari Google Fonts (latin subset),
-   web/fonts/. Range weight = rentang axis font asli; browser memilih
-   instance sesuai `font-weight` pemakaian. Fallback tetap Segoe UI /
-   Consolas kalau file gagal dimuat (mis. packaging). */
-@font-face {
-  font-family: 'Space Grotesk';
-  font-style: normal;
-  font-weight: 300 700;
-  font-display: swap;
-  src: url('fonts/SpaceGrotesk.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url('fonts/Inter.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 100 800;
-  font-display: swap;
-  src: url('fonts/JetBrainsMono.woff2') format('woff2');
-}
+@font-face { font-family: 'Space Grotesk'; font-style: normal; font-weight: 300 700; font-display: swap; src: url('fonts/SpaceGrotesk.woff2') format('woff2'); }
+@font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('fonts/Inter.woff2') format('woff2'); }
+@font-face { font-family: 'JetBrains Mono'; font-style: normal; font-weight: 100 800; font-display: swap; src: url('fonts/JetBrainsMono.woff2') format('woff2'); }
 
 :root {
-  /* palet (sinkron ui/theme.py) */
-  --bg-0: #0B0E13;        /* background utama        (COLOR_BG_APP)   */
-  --bg-1: #12161D;        /* sidebar, titlebar, footer(COLOR_BG_PANEL) */
-  --bg-2: #171C25;        /* card / kotak info        (COLOR_BG_CARD)  */
-  --border: #262E3A;      /* border default           (COLOR_BORDER)   */
-  --border-soft: #1C222C; /* border redup             (COLOR_BORDER_SOFT) */
-  --text-hi: #EAEEF4;     /* teks utama               (COLOR_TEXT_HI)  */
-  --text-mid: #9AA5B4;    /* teks sekunder            (COLOR_TEXT_MID) */
-  --text-low: #5F6C7D;    /* teks redup/hint          (COLOR_TEXT_LOW) */
-  --amber: #FF9142;       /* aksen utama              (COLOR_AMBER)    */
-  --amber-hover: #E8873D; /* hover primary            (COLOR_AMBER_HOVER) */
-  --green: #3ECF8E;       /* sukses/OK                (COLOR_GREEN)    */
-  --red: #F0596B;         /* gagal/error              (COLOR_RED)      */
+  /* permukaan */
+  --bg: #0D1015;
+  --surface: #141821;
+  --surface-2: #1A1F2A;
+  --surface-3: #232938;
+  --border: rgba(255, 255, 255, .08);
+  --border-strong: rgba(255, 255, 255, .16);
+  /* teks (kontras ≥ 4.5:1 di semua permukaan) */
+  --text: #E8EBF0;
+  --text-muted: #A3ABB8;
+  --text-dim: #8A93A2;
+  /* aksen + semantik */
+  --accent: #F2994A;
+  --accent-hover: #F6A862;
+  --accent-soft: rgba(242, 153, 74, .12);
+  --on-accent: #1A1208;
+  --success: #4CD39A;
+  --warning: #F2C14E;
+  --danger: #F27381;
+  --info: #6FA8F2;
+  --focus: #7DB4FF;
 
-  /* tipografi */
   --font-head: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
   --font-body: 'Inter', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', Consolas, 'Courier New', monospace;
 
-  /* ── skala font eksplisit (redesign 2026-08-19 — audit Tahap 1 §6.10:
-     5 nilai hardcoded 11/12/13/14/16/20px diganti token) ── */
-  --fs-micro: 11px;  /* micro-label, sum-label, badge, caption */
-  --fs-small: 12px;  /* input, tombol kecil, log, footer */
-  --fs-btn: 13px;    /* tombol normal, sidebar item */
-  --fs-body: 14px;   /* body default */
-  --fs-md: 16px;     /* titlebar title */
-  --fs-lg: 20px;     /* sum-value (angka besar) */
+  /* skala tipografi tetap */
+  --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-16: 16px; --fs-20: 20px; --fs-28: 28px;
 
-  /* ── spacing token (disiplin rubrik anti-slop: skala kecil terjaga) ── */
-  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;  --sp-5: 20px;
-  /* padding tombol/input — nilai yang dulu hardcoded liar (audit §6.1:
-     10px/26px btn, 5px/14px small, 5px/10px input) di-token:
-     26px -> 24px (genap), 5/14 -> 6/12 (bulat ke skala) */
-  --sp-btn-y: 10px;  --sp-btn-x: 24px;   /* .btn */
-  --sp-sm-y: 6px;    --sp-sm-x: 12px;    /* .btn.small & .input */
-  --radius: 6px;
+  --r: 12px; --r-sm: 8px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35);
+  --ease: cubic-bezier(.22, 1, .36, 1);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-
 html, body { height: 100%; }
-
 body {
-  background: var(--bg-0);
-  color: var(--text-hi);
-  font-family: var(--font-body);
-  font-size: var(--fs-body);
-  display: flex;
-  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 var(--fs-14)/1.5 var(--font-body);
+  display: flex; flex-direction: column;
+  min-width: 900px;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.hidden { display: none !important; }
 
-/* ── titlebar ─────────────────────────────────────────────────────── */
-.titlebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  padding: var(--sp-3) var(--sp-5);
-  background: var(--bg-1);
-  border-bottom: 1px solid var(--border-soft);
+/* ── header ───────────────────────────────────────────────────────── */
+.app-header {
+  position: relative;
+  height: 52px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
-.tb-left { display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; }
-.tb-title { font-family: var(--font-head); font-weight: 700; color: var(--amber); font-size: var(--fs-md); white-space: nowrap; }
-.tb-sub  { color: var(--text-mid); white-space: nowrap; }
-.tb-ver  { color: var(--text-low); font-style: italic; white-space: nowrap; }
-.tb-clock { color: var(--text-mid); font-weight: 700; font-family: var(--font-mono); white-space: nowrap; }
+.hd-left, .hd-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.hd-logo {
+  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: var(--accent); color: var(--on-accent);
+  font: 700 var(--fs-16)/1 var(--font-head);
+}
+.hd-title { font: 600 var(--fs-16)/1 var(--font-head); white-space: nowrap; }
+.hd-ver {
+  font: 500 var(--fs-12)/1 var(--font-mono); color: var(--text-muted);
+  padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; white-space: nowrap;
+}
+.hd-sub { color: var(--text-dim); font-size: var(--fs-13); white-space: nowrap; padding-left: 12px; border-left: 1px solid var(--border); }
+.hd-clock { font: 500 var(--fs-13)/1 var(--font-mono); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.hd-running { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); font-weight: 600; color: var(--accent); }
 
-/* ── layout sidebar + main ────────────────────────────────────────── */
+/* garis progres global di tepi atas jendela */
+.global-progress {
+  position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 40;
+  overflow: hidden; opacity: 0; transition: opacity .2s ease-out; pointer-events: none;
+}
+.global-progress span {
+  display: block; width: 30%; height: 100%; background: var(--accent);
+  border-radius: 0 3px 3px 0; animation: indet 1.4s ease-in-out infinite;
+}
+body.is-running .global-progress { opacity: 1; }
+
+/* ── layout ───────────────────────────────────────────────────────── */
 .layout { display: flex; flex: 1; min-height: 0; }
 
 .sidebar {
-  width: 260px;
-  flex-shrink: 0;
-  background: var(--bg-1);
-  border-right: 1px solid var(--border-soft);
-  padding: var(--sp-4) var(--sp-2);
+  width: 244px; flex-shrink: 0;
+  padding: 12px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
   overflow-y: auto;
 }
-.sb-brand { padding: 0 var(--sp-3) var(--sp-3) var(--sp-3); }
-.sb-title { font-family: var(--font-head); font-weight: 700; color: var(--amber); font-size: var(--fs-btn); letter-spacing: .4px; }
-.sb-subtitle { color: var(--text-low); font-style: italic; font-size: var(--fs-small); margin-top: 2px; }
-.sb-section {
-  font-family: var(--font-head);
-  font-weight: 700; color: var(--text-mid); font-size: var(--fs-micro);
-  letter-spacing: 1px; padding: var(--sp-3) var(--sp-3) var(--sp-1) var(--sp-3);
-  text-transform: uppercase;
-}
-.sb-nav { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-2); }
+.sb-group-label { font: 600 var(--fs-12)/1 var(--font-body); color: var(--text-dim); padding: 16px 12px 8px; }
+.sb-nav { display: flex; flex-direction: column; gap: 2px; }
 
 .sb-item {
   position: relative;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  color: var(--text-hi);
-  border: none;
-  border-radius: var(--radius);
-  font-family: var(--font-body);
-  font-weight: 600;
-  font-size: var(--fs-btn);
-  padding: var(--sp-2) var(--sp-3);
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; height: 40px; padding: 0 12px;
+  background: transparent; border: 0; border-radius: var(--r-sm);
+  color: var(--text-muted); font-weight: 500; font-size: var(--fs-13); text-align: left;
   cursor: pointer;
-  transition: background .12s ease, color .12s ease;
+  transition: background-color .15s ease-out, color .15s ease-out;
 }
-.sb-item:hover { background: var(--bg-2); color: var(--amber); }
-.sb-item.active {
-  background: var(--bg-2);
-  color: var(--amber);
-  box-shadow: inset 2px 0 0 var(--amber);
+.sb-item:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
+.sb-item.active { background: var(--accent-soft); color: var(--text); }
+.sb-item.active::before {
+  content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--accent);
 }
-.sb-item.danger:hover { color: var(--red); }
-/* badge "hasil baru" — run selesai saat user di layar lain (pengganti
-   auto-nav Dashboard: user tidak dipaksa pindah, cuma diberi tahu). */
-.sb-item.sb-new::after {
-  content: "●";
-  position: absolute;
-  right: var(--sp-3);
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 9px;
-  line-height: 1;
-  color: var(--amber);
-}
+.sb-item.danger:hover { color: var(--danger); }
+.sb-icon { width: 20px; height: 20px; display: grid; place-items: center; flex-shrink: 0; }
+.sb-icon svg { display: block; }
+.sb-item.active .sb-icon { color: var(--accent); }
+.sb-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-state { width: 16px; height: 16px; display: none; place-items: center; flex-shrink: 0; }
+.sb-item .sb-state > * { display: none; }
+.sb-item[data-state="running"] .sb-state, .sb-item[data-state="done"] .sb-state, .sb-item[data-state="fail"] .sb-state { display: grid; }
+.sb-item[data-state="running"] .sb-state .pulse-dot { display: block; }
+.sb-item[data-state="done"] .sb-state .st-ok { display: block; color: var(--success); }
+.sb-item[data-state="fail"] .sb-state .st-fail { display: block; color: var(--danger); }
 
-/* ── main ─────────────────────────────────────────────────────────── */
-/* .main = flex column supaya screen aktif bisa stretch penuh ke tinggi
-   window (chain: html/body 100% → .layout flex:1 → .main flex:1 →
-   .screen flex:1). Overflow konten (settings di window kecil) tetap
-   di-scroll .main. */
-.main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: var(--sp-4) var(--sp-5);
-}
-
+.main { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 28px 32px; }
+.content { max-width: 1200px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; }
 .screen { display: none; }
-.screen.active { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.screen.active { display: flex; flex-direction: column; flex: 1; min-height: 0; animation: screenIn .22s var(--ease); }
 
-/* card generik */
-.card {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--sp-3) var(--sp-4);
-}
-.card + .card { margin-top: var(--sp-3); }
-/* margin `.card + .card` hanya untuk card BERTUMPUK (Settings lama). Di
-   dalam .dash-grid / .settings-grid, margin-top item malah merusak
-   keseragaman baris (item terdorong 12px ke bawah + row track ikut
-   membesar — akar masalah card sebaris tidak sama tinggi). Grid sudah
-   punya `gap` sendiri. */
-.dash-grid .card + .card,
-.settings-grid .card + .card { margin-top: 0; }
+/* ── kepala halaman ───────────────────────────────────────────────── */
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; margin-bottom: 20px; }
+.page-titles { min-width: 0; }
+.page-titles h2 { font: 700 var(--fs-20)/1.3 var(--font-head); letter-spacing: -.01em; }
+.page-titles p { color: var(--text-muted); font-size: var(--fs-13); margin-top: 2px; }
+.page-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.section-title { font: 600 var(--fs-16)/1.3 var(--font-head); margin: 0 0 12px; }
+.date-chip { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font: 500 var(--fs-13)/1 var(--font-mono); }
 
-/* Settings (Opsi B) — 3 card SEJAJAR horizontal satu baris; di window
-   sempit (<1000px) turun ke satu kolom. */
-.settings-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--sp-3);
-}
-.card-title { font-family: var(--font-head); font-weight: 700; color: var(--amber); margin-bottom: var(--sp-2); }
-.card-label { color: var(--text-mid); line-height: 1.7; }
-.card-val   { color: var(--text-hi); font-weight: 700; line-height: 1.7; }
-#set-tools { white-space: pre-line; }
-
-/* ── dashboard ──────────────────────────────────────────────────────
-   Card TINGGI MENGIKUTI KONTEN per-baris (bukan stretch penuh tinggi
-   window): grid-auto-rows:1fr DIHAPUS (biang card melar ke sisa window).
-   align-items default = stretch: card SEBARIS otomatis menyamakan tinggi
-   dengan card tertinggi di ROW itu (System Info = Performance, Quick
-   Start = Shortcuts) — TANPA memaksa row lain / seluruh grid ikut melar,
-   karena baris auto-size ke konten terbesarnya. Antar-row bebas beda
-   tinggi. align-content:start → baris rapat di atas; ruang kosong sisa
-   di bawah grid itu WAJAR (natural whitespace), bukan masalah yang harus
-   diisi paksa. Beda treatment dari ToolScreen/LogScreen (fill-height,
-   log panel scrollable) — jangan generalisasi. */
-.dash-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-3);
-  flex: 1;
-  min-height: 0;
-  align-content: start;
-}
-
-/* ── dashboard toolbar (Opsi B) ──────────────────────────────────────
-   Pakai .toolbar sebagai strip: metrik System Info + CPU/RAM (ikon +
-   label + nilai sejajar horizontal), tanggal rata kanan via .tb-spacer.
-   KIRI = info sistem, KANAN = tanggal — pemisahan peran yang sama
-   dengan layar tool (kontrol vs aksi). */
-.dash-metric {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  color: var(--text-mid);
-  white-space: nowrap;
-}
-.dash-metric svg { flex-shrink: 0; opacity: .85; }
-.dash-k {
-  font-family: var(--font-head);
-  font-weight: 700;
-  font-size: var(--fs-micro);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-.dash-v { color: var(--text-hi); font-weight: 700; font-family: var(--font-mono); font-size: var(--fs-small); }
-.dash-date {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  color: var(--text-mid);
-  font-family: var(--font-mono);
-  font-size: var(--fs-small);
-  white-space: nowrap;
-}
-
-/* ── tool screen ──────────────────────────────────────────────────── */
-.tool-title { font-family: var(--font-head); font-weight: 700; color: var(--amber); margin-bottom: var(--sp-1); }
-.tool-desc  { color: var(--text-mid); margin-bottom: var(--sp-3); }
-
-/* ── toolbar satu baris (Opsi B) ─────────────────────────────────────
-   Kontainer semua kontrol screen tool/dashboard: bg-1 + border tipis =
-   unit visual terpisah dari canvas bg-0. Rata-rata item di tengah;
-   .tb-spacer (flex:1) mendorong zona kanan (Start/Stop, tanggal) ke
-   ujung kanan — pemisahan KIRI = kontrol mode / KANAN = aksi run.
-   flex-wrap: di window sempit zona wrap utuh sebagai satu blok. */
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-3);
-  background: var(--bg-1);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  padding: var(--sp-2) var(--sp-3);
-  margin-bottom: var(--sp-3);
-}
-.tb-item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
-.tb-spacer { flex: 1 1 0; min-width: var(--sp-4); }
-
-/* ── split 2 kolom layar tool (Opsi B) ───────────────────────────────
-   KIRI (~200px, status + summary) vs KANAN (log). Kolom kanan min-width
-   0 supaya log tidak memaksa grid meluber; log panel flex:1 memenuhi
-   sisa tinggi (pola fill-height sama seperti LogScreen). */
-.split {
-  display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: var(--sp-3);
-  flex: 1;
-  min-height: 0;
-}
-.split-left {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  min-width: 0;
-  overflow-y: auto;
-}
-.split-right {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
-.status-box { flex-shrink: 0; }
-.status-box .progress { margin-bottom: 0; }
-
+/* ── tombol ───────────────────────────────────────────────────────── */
 .btn {
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: var(--fs-btn);
-  padding: var(--sp-btn-y) var(--sp-btn-x);
-  border-radius: var(--radius);
-  border: 1px solid;
-  cursor: pointer;
-  white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 36px; padding: 0 16px;
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  font-weight: 600; font-size: var(--fs-13); white-space: nowrap; cursor: pointer;
+  transition: background-color .15s ease-out, border-color .15s ease-out, color .15s ease-out, transform .12s ease-out;
 }
-.btn.start { background: var(--amber); color: var(--bg-0); border-color: var(--amber); }
-.btn.start:hover { background: var(--amber-hover); border-color: var(--amber-hover); }
-.btn.stop  { background: var(--red); color: var(--bg-0); border-color: var(--red); }
-.btn.stop:hover { filter: brightness(.92); }
-.btn:disabled { background: var(--bg-2); color: var(--text-low); border-color: var(--border); cursor: not-allowed; }
-.btn:disabled:hover { filter: none; }
-/* tombol sekunder kecil (Salin Log) — kontur redup, tidak menyaingi Start */
-.btn.ghost { background: transparent; color: var(--text-mid); border-color: var(--border); }
-.btn.ghost:hover { color: var(--amber); border-color: var(--amber); background: var(--bg-2); }
-/* Feedback salin (lihat copyTextToClipboard di app.js): flash warna,
-   BUKAN swap teks — swap mengubah lebar tombol & memicu reflow
-   flex-wrap copy-bar (tombol Faktur pindah baris -> klik meleset). */
-.btn.copied { color: var(--green) !important; border-color: var(--green) !important; }
-.btn.copy-fail { color: var(--red) !important; border-color: var(--red) !important; }
-.btn.small { padding: var(--sp-sm-y) var(--sp-sm-x); font-size: var(--fs-small); }
+.btn:active:not(:disabled) { transform: scale(.97); }
+.btn:disabled { cursor: not-allowed; }
+.btn svg { display: block; flex-shrink: 0; }
+.btn.small { height: 30px; padding: 0 12px; font-size: var(--fs-12); }
+.btn-ic { display: inline-grid; place-items: center; }
 
-/* tombol PILIHAN (.btn.choice — mode tool, mode data, selector toko).
-   Menggabung .btn.mode + .btn.store yang dulu definisi identik (audit
-   §3/§6.2). Gaya SEGMENTED CONTROL: outline/ghost, active = bg-1 + border
-   amber (bukan solid amber penuh) — biar .btn.start tetap SATU-SATUNYA
-   tombol amber solid di seluruh app (amber solid = "aksi utama/jalankan"). */
-.btn.choice { background: transparent; color: var(--text-mid); border-color: var(--border); }
-.btn.choice:hover { color: var(--amber); border-color: var(--amber); background: var(--bg-1); }
-.btn.choice.active { background: var(--bg-1); color: var(--amber); border-color: var(--amber); }
-.btn.choice:disabled { background: var(--bg-2); color: var(--text-low); border-color: var(--border); cursor: not-allowed; }
+.btn.start { background: var(--accent); color: var(--on-accent); min-width: 108px; }
+.btn.start:hover:not(:disabled) { background: var(--accent-hover); }
+.btn.start:disabled { background: var(--surface-2); color: var(--text-dim); border-color: var(--border); }
+.btn.start.is-running:disabled { background: var(--accent-soft); color: var(--accent); border-color: rgba(242, 153, 74, .4); cursor: progress; }
 
-/* selector TOKO (Auto-Fetch Shopee, 2026-08-19) — semua toko aktif
-   (2026-08-20), tombol pilihan sejajar. flex-wrap: biar 3 tombol dengan
-   nama panjang tidak overflow di window sempit (wrap per-tombol). */
-.store-btns { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
-.store-btns .btn.choice { flex-shrink: 0; }
+.btn.stop { background: transparent; color: var(--text-dim); border-color: var(--border); }
+.btn.stop:not(:disabled) { background: var(--danger); border-color: var(--danger); color: #1B0A0D; }
+.btn.stop:not(:disabled):hover { filter: brightness(.92); }
 
-/* Rentang Tanggal (Auto-Fetch, 2026-08-19) — sebelum tombol Fetch, hanya
-   mode Otomatis. Input date native. flex-wrap sama seperti store-btns. */
-.date-range { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
-.date-range-label { font-size: var(--fs-small); color: var(--text-mid); font-weight: 600; }
-.date-range-sep { font-size: var(--fs-small); color: var(--text-low); }
+.btn.ghost { background: transparent; color: var(--text-muted); border-color: var(--border); }
+.btn.ghost:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); background: rgba(255, 255, 255, .04); }
+.btn.secondary { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
+.btn.secondary:hover:not(:disabled) { background: var(--surface-3); }
+.btn.secondary:disabled { color: var(--text-dim); border-color: var(--border); background: var(--surface-2); opacity: .7; }
+.btn.copied { color: var(--success) !important; border-color: var(--success) !important; }
+.btn.copy-fail { color: var(--danger) !important; border-color: var(--danger) !important; }
 
-/* tombol "Fetch dari Shopee" (2026-08-20) — ghost + ikon unduh inline,
-   ukuran normal (align-self: flex-start; zona flex column me-stretch
-   anaknya ke full-width tanpa ini -> tombol jadi kotak kosong lebar).
-   Gaya sama dengan .btn.ghost lain: hover -> amber. Ikon SVG (bukan
-   emoji) senafas stroke tombol lain yang semuanya text-only. */
-.btn.fetch {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
+.spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent;
+  animation: spin .8s linear infinite;
+}
+.start-hint { font-size: var(--fs-13); color: var(--text-muted); padding-right: 4px; }
+
+/* ── status chip ──────────────────────────────────────────────────── */
+.status-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 14px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
+  font-weight: 600; font-size: var(--fs-13); color: var(--text-muted); white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: color .2s ease-out, border-color .2s ease-out, background-color .2s ease-out;
+}
+.status-chip .sc-lead { display: inline-grid; place-items: center; width: 16px; height: 16px; }
+.status-chip.running { color: var(--accent); border-color: rgba(242, 153, 74, .4); background: var(--accent-soft); }
+.status-chip.finished { color: var(--success); border-color: rgba(76, 211, 154, .4); }
+.status-chip.failed { color: var(--danger); border-color: rgba(242, 115, 129, .45); }
+.status-chip.stopped { color: var(--warning); border-color: rgba(242, 193, 78, .4); }
+.idle-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .6; }
+svg .draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw .35s ease-out .05s forwards; }
+
+.pulse-dot { position: relative; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.pulse-dot::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--accent);
+  animation: ring 1.6s ease-out infinite;
 }
 
-/* komponen INPUT dasar (redesign 2026-08-19 — menggabung .date-input +
-   .copy-filter yang dulu beda tipis, audit §6.3). Modifier: .date, .select.
-   Feedback KONSISTEN: hover DAN focus sama-sama border amber + ring. */
+/* ── kontrol (mode, toko, tanggal) ────────────────────────────────── */
+.controls {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 28px;
+  padding: 14px 16px; margin-bottom: 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+}
+.ctl-zone { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 28px; }
+.ctl-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ctl-group.grow { flex: 1; min-width: 200px; }
+.ctl-label { font: 600 var(--fs-12)/1 var(--font-body); color: var(--text-dim); }
+.ctl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.ctl-help { flex-basis: 100%; display: flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--text-muted); }
+
+/* kontrol segmented: pilihan mode — tampak "terpilih", bukan tombol aksi */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; }
+.seg .btn.choice {
+  height: 32px; padding: 0 14px; background: transparent; color: var(--text-muted);
+  border: 1px solid transparent; border-radius: 7px;
+}
+.seg .btn.choice:hover:not(:disabled) { color: var(--text); background: rgba(255, 255, 255, .05); }
+.seg .btn.choice.active { background: var(--surface-3); color: var(--text); border-color: var(--border-strong); box-shadow: var(--shadow); }
+.seg .btn.choice.active::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.seg .btn.choice:disabled { opacity: .5; }
+
 .input {
-  background: var(--bg-1);
-  color: var(--text-hi);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--sp-sm-y) var(--sp-sm-x);
-  font-size: var(--fs-small);
-  font-family: var(--font-body);
+  height: 36px; padding: 0 12px; color-scheme: dark;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  font: 500 var(--fs-13) var(--font-body);
+  transition: border-color .15s ease-out;
 }
-.input:hover { border-color: var(--amber); }
-.input:focus { outline: none; border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+.input:hover { border-color: var(--border-strong); }
+.input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.input.search { width: 100%; }
+.date-fields { display: inline-flex; align-items: center; gap: 8px; }
+.date-range-sep { color: var(--text-dim); font-size: var(--fs-13); }
 
-/* elemen yang disembunyikan JS (mode-btns saat tool tanpa modes, Start saat ada modes) */
-.hidden { display: none !important; }
+/* ── alert (error & sukses): teks penuh, boleh turun baris ───────── */
+.alert {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 16px; margin-bottom: 16px;
+  border: 1px solid; border-radius: 10px;
+}
+.alert-ic { flex-shrink: 0; margin-top: 1px; }
+.alert-body { flex: 1; min-width: 0; }
+.alert-body strong { display: block; font-weight: 600; }
+.alert-body p { margin-top: 2px; font-size: var(--fs-13); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.alert-body p:empty { display: none; }
+.alert.error { background: rgba(242, 115, 129, .08); border-color: rgba(242, 115, 129, .4); }
+.alert.error .alert-ic, .alert.error strong { color: var(--danger); }
+.alert.success { background: rgba(76, 211, 154, .08); border-color: rgba(76, 211, 154, .4); }
+.alert.success .alert-ic, .alert.success strong { color: var(--success); }
+.success-banner { display: none; }
+.success-banner.show { display: flex; animation: alertIn .22s var(--ease); }
+.alert.error:not(.hidden) { animation: alertIn .22s var(--ease); }
 
-/* status pill (Opsi B) — badge rounded dengan dot warna status.
-   Dot = ::before bulat currentColor; warna pill ikut status (idle =
-   text-mid, running = amber, finished = hijau, failed = merah).
-   PENTING (geometri verifier pixel): border pill harus --border-soft
-   (#1C222C) SELALU — border --border (#262E3A) atau amber akan terdeteksi
-   `is_edge` oleh choice_btns (band 90-240) dan bisa false-pair dengan
-   tepi tombol toolbar. Status warna lewat dot + teks saja. */
-.tool-status {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-1) var(--sp-3);
-  background: var(--bg-1);
-  border: 1px solid var(--border-soft);
-  border-radius: 999px;
-  color: var(--text-mid);
-  font-weight: 600;
-  margin-bottom: var(--sp-2);
-  white-space: nowrap;
-}
-.tool-status::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-  flex-shrink: 0;
-}
-.tool-status.running  { color: var(--amber); }
-.tool-status.finished { color: var(--green); }
-.tool-status.failed   { color: var(--red); }
-
-.progress {
-  height: 8px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  margin-bottom: var(--sp-3);
-}
-.progress-fill {
-  height: 100%;
-  width: 0%;
-  background: var(--amber);
-  transition: width .2s ease;
-}
-
-.success-banner {
-  display: none;
-  align-items: center;
-  padding: var(--sp-2) var(--sp-4);
-  margin-bottom: var(--sp-3);
-  background: var(--bg-2);
-  border: 1px solid var(--green);
-  border-radius: var(--radius);
-  color: var(--green);
-  font-weight: 700;
-}
-.success-banner.show { display: flex; }
-
-/* summary grid (Opsi B) — di KOLOM KIRI .split, 2 kolom (2x3 untuk 5
-   card). Card lebih ramping (padding sp-2/sp-3) biar tidak mendominasi
-   kolom sempit; angka besar tetap fs-lg. */
-.sum-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  /* baris grid ikut tinggi baris tertinggi — label micro yang wrap
-     (kolom kiri 200px -> card sempit) tidak bikin tinggi card beda */
-  grid-auto-rows: 1fr;
-  gap: var(--sp-2);
-}
+/* ── kartu metrik (baris horizontal) ──────────────────────────────── */
+.metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .sum-card {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--sp-2) var(--sp-3);
+  position: relative; overflow: hidden;
+  padding: 14px 16px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
 }
-.sum-label { color: var(--text-low); font-weight: 700; font-size: var(--fs-micro); letter-spacing: .6px; }
-.sum-value { color: var(--text-hi); font-weight: 700; font-size: var(--fs-lg); font-family: var(--font-mono); }
+.sum-label { font-size: var(--fs-12); font-weight: 500; color: var(--text-muted); }
+.sum-value {
+  margin-top: 4px;
+  font: 700 var(--fs-28)/1.2 var(--font-mono); font-variant-numeric: tabular-nums;
+  color: var(--text); transition: color .2s ease-out;
+}
+.sum-card.is-on[data-tone="success"] .sum-value { color: var(--success); }
+.sum-card.is-on[data-tone="warning"] .sum-value { color: var(--warning); }
+.sum-card.is-on[data-tone="danger"] .sum-value { color: var(--danger); }
+.sum-card.loading .sum-value { color: transparent; background: rgba(255, 255, 255, .06); border-radius: 6px; width: 56%; }
+.sum-card.loading::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .07), transparent);
+  transform: translateX(-100%); animation: shimmer 1.4s ease-in-out infinite;
+}
 
-/* ── bar salin per kolom (fitur tempel Excel) ──────────────────────
-   Muncul setelah ada hasil run (items ter-parse dari tabel ringkasan
-   tool). Dropdown filter + 3 tombol kolom — ketiganya memakai urutan
-   baris yang sama persis (sejajar utk 3 kolom Excel). */
-.copy-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  padding: var(--sp-2) var(--sp-3);
-  margin-bottom: var(--sp-2);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.copy-bar-title { font-family: var(--font-head); font-weight: 700; color: var(--text-mid); font-size: var(--fs-micro); letter-spacing: 1px; margin-right: 2px; }
-.copy-bar-count { margin-left: auto; color: var(--text-low); font-size: var(--fs-micro); }
+/* ── panel output ─────────────────────────────────────────────────── */
+.panel { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+.output-panel { flex: 1 1 320px; min-height: 280px; }
+.panel-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+.panel-head h3 { font: 600 var(--fs-14)/1 var(--font-head); }
+.panel-meta { color: var(--text-dim); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.panel-tools { margin-left: auto; display: flex; gap: 8px; }
 
-/* bar kecil di atas log panel tool: judul + tombol Salin Log (Kelompok C) */
-.log-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--sp-2);
-}
-.log-bar-title { font-family: var(--font-head); font-weight: 700; color: var(--text-mid); font-size: var(--fs-micro); letter-spacing: 1px; }
+.progress { position: relative; height: 3px; flex-shrink: 0; overflow: hidden; }
+.progress-fill { height: 100%; width: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); transition: transform .3s var(--ease); }
+.progress.indeterminate .progress-fill { width: 35%; transform: none; transition: none; animation: indet 1.3s ease-in-out infinite; }
+.progress.done .progress-fill { background: var(--success); transform: scaleX(1); animation: fadeOut .6s ease-out 1s forwards; }
+.progress.failed .progress-fill { background: var(--danger); transform: scaleX(1); }
 
-/* Screenshot Iklan (2026-09-03): preview thumbnail hasil screenshot +
-   tombol salin gambar ke clipboard. Sekarang SATU KARTU per toko
-   (loop semua toko 1→2→3) — kartu ditumpuk ke bawah. */
-.shot-previews {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-2);
-}
-.shot-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-.shot-card-title { font-family: var(--font-head); font-weight: 700; color: var(--text-mid); font-size: var(--fs-micro); letter-spacing: 1px; word-break: break-all; }
-.shot-thumb {
-  max-width: 300px;
-  max-height: 180px;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-0);
-}
-.shot-path { font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text-low); word-break: break-all; }
-/* tombol "Salin Semua" & salin per kartu dihapus (2026-09-17): gabungan
-   otomatis tersalin ke clipboard saat run selesai (app.py on_finished). */
+.copy-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.copy-bar-title { font-size: var(--fs-13); font-weight: 600; color: var(--text-muted); margin-right: 4px; }
+.copy-bar-count { margin-left: auto; color: var(--text-dim); font-size: var(--fs-12); }
+.input.select { height: 30px; font-size: var(--fs-12); padding: 0 8px; }
 
-/* log panel (tool & logs) */
+.log-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
 .log {
-  flex: 1;
-  min-height: 120px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--sp-3);
-  font-family: var(--font-mono);
-  font-size: var(--fs-small);
-  line-height: 1.6;
-  color: var(--text-hi);
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  /* Kelompok C: teks log wajib bisa di-select & copy manual (klik-drag
-     pilih → Ctrl+C). Context menu kanan di-disable pywebview di mode
-     produksi, jadi selection + shortcut / tombol Salin Log = jalurnya. */
-  user-select: text;
-  -webkit-user-select: text;
-  cursor: text;
+  flex: 1; min-width: 0; margin: 0; padding: 14px 16px;
+  font: 400 var(--fs-12)/1.7 var(--font-mono); color: var(--text);
+  background: var(--bg); overflow: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  user-select: text; -webkit-user-select: text; cursor: text;
 }
-
-/* marker warna log — token SAMA dengan ui/theme.py (COLOR_INFO/SUCCESS/
-   ERROR/WARNING/SUBTLE = var di atas). Dipakai app.js styleLogLine(). */
+.log-empty {
+  position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 24px; text-align: center; pointer-events: none;
+  color: var(--text-dim); font-size: var(--fs-13);
+}
+.log:empty + .log-empty { display: flex; }
 .log-marker { font-weight: 700; }
-.log-marker-info    { color: var(--amber); }
-.log-marker-success { color: var(--green); }
-.log-marker-error   { color: var(--red); }
-.log-marker-warn    { color: var(--amber); }
-.log-marker-debug   { color: var(--text-low); }
+.log-marker-info { color: var(--info); }
+.log-marker-success { color: var(--success); }
+.log-marker-error { color: var(--danger); }
+.log-marker-warn { color: var(--warning); }
+.log-marker-debug { color: var(--text-dim); }
+.lv-error { color: var(--danger); }
+.lv-warn { color: var(--warning); }
+.log-anim { display: inline-block; width: 100%; vertical-align: top; animation: logIn .2s ease-out; }
 
-/* ── logs screen ──────────────────────────────────────────────────── */
-.log-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-4);
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--sp-2) var(--sp-4);
-  margin-bottom: var(--sp-3);
+/* ── Screenshot Iklan ─────────────────────────────────────────────── */
+.shot-previews { margin-bottom: 16px; }
+.shot-paste-hint {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px;
+  padding: 10px 14px; margin-bottom: 12px;
+  background: var(--accent-soft); border: 1px solid rgba(242, 153, 74, .25); border-radius: 10px;
+  font-size: var(--fs-13);
 }
-.log-head-title { font-family: var(--font-head); font-weight: 700; color: var(--amber); }
-.log-head-sub { color: var(--text-low); font-size: var(--fs-small); }
-.log-head .btn.ghost { margin-left: auto; }
+.hotkey-chip {
+  display: inline-flex; align-items: center; padding: 2px 8px;
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 6px;
+  font: 600 var(--fs-12)/1.5 var(--font-mono); color: var(--accent); white-space: nowrap;
+}
+.store-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.store-card {
+  display: flex; flex-direction: column; gap: 10px; padding: 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r);
+  transition: border-color .2s ease-out;
+}
+.store-card[data-status="proc"] { border-color: rgba(242, 153, 74, .5); }
+.store-card[data-status="fail"] { border-color: rgba(242, 115, 129, .5); }
+.store-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.store-name { font-weight: 600; font-size: var(--fs-14); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge {
+  display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; flex-shrink: 0;
+  font-size: var(--fs-12); font-weight: 600; background: var(--surface-3); color: var(--text-muted);
+  transition: color .2s ease-out, background-color .2s ease-out;
+}
+.badge[data-status="proc"] { background: var(--accent-soft); color: var(--accent); }
+.badge[data-status="done"] { background: rgba(76, 211, 154, .12); color: var(--success); }
+.badge[data-status="fail"] { background: rgba(242, 115, 129, .12); color: var(--danger); }
+.thumb-box {
+  position: relative; overflow: hidden; aspect-ratio: 16 / 10;
+  display: grid; place-items: center;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--text-dim);
+}
+.shot-thumb { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; animation: fadeIn .25s ease-out; }
+.store-card[data-status="proc"] .thumb-box::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .06), transparent);
+  transform: translateX(-100%); animation: shimmer 1.4s ease-in-out infinite;
+}
+.shot-path { font: 400 var(--fs-12)/1.4 var(--font-mono); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.store-card .btn { width: 100%; }
 
-/* ── footer ───────────────────────────────────────────────────────── */
-.footer {
-  padding: var(--sp-2) var(--sp-5);
-  background: var(--bg-1);
-  border-top: 1px solid var(--border-soft);
-  color: var(--text-low);
-  font-size: var(--fs-small);
+/* ── dashboard ────────────────────────────────────────────────────── */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 16px 20px; }
+.card-title { font: 600 var(--fs-14)/1.3 var(--font-head); margin-bottom: 12px; }
+.card-text { color: var(--text-muted); font-size: var(--fs-13); margin-top: 12px; }
+.mono-sm { font-family: var(--font-mono); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.dash-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 28px; }
+.macro-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.meter-row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-13); color: var(--text-muted); margin-bottom: 6px; }
+.meter-val { font: 600 var(--fs-13) var(--font-mono); color: var(--text); font-variant-numeric: tabular-nums; }
+.meter { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; margin-bottom: 12px; }
+.meter i { display: block; height: 100%; width: 100%; background: var(--success); transform-origin: left; transform: scaleX(0); transition: transform .4s var(--ease); }
+.meter i.warn { background: var(--warning); }
+.meter i.crit { background: var(--danger); }
+
+.tool-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.tool-card { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); }
+.tool-card-top { display: flex; align-items: center; gap: 12px; }
+.tool-card-ic { width: 36px; height: 36px; display: grid; place-items: center; flex-shrink: 0; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.tool-card h4 { font: 600 var(--fs-16)/1.3 var(--font-head); }
+.tool-card p { color: var(--text-muted); font-size: var(--fs-13); }
+.tool-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; }
+.tool-card-status { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-13); color: var(--text-muted); min-width: 0; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
+.dot.ok { background: var(--success); }
+.dot.fail { background: var(--danger); }
+
+/* ── log & pengaturan ─────────────────────────────────────────────── */
+.logs-controls { align-items: flex-end; }
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.kv { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px 12px; font-size: var(--fs-13); }
+.kv dt { color: var(--text-muted); }
+.kv dd { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.plain-list { list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: var(--fs-13); }
+.plain-list li { display: flex; justify-content: space-between; gap: 12px; }
+.plain-list .mono-sm { color: var(--text-dim); }
+
+/* ── toast ────────────────────────────────────────────────────────── */
+.toast-root { position: fixed; right: 20px; bottom: 20px; z-index: 50; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.toast {
+  display: flex; align-items: center; gap: 10px; max-width: 360px;
+  padding: 10px 14px; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .4); font-size: var(--fs-13); font-weight: 600;
+  animation: toastIn .2s var(--ease);
 }
+.toast.out { animation: toastOut .2s ease-in forwards; }
+.toast.success .toast-ic { color: var(--success); }
+.toast.error .toast-ic { color: var(--danger); }
+.toast.info .toast-ic { color: var(--info); }
+.toast-ic { display: grid; place-items: center; flex-shrink: 0; }
+
+/* ── splash ───────────────────────────────────────────────────────── */
+#splash {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: var(--bg); pointer-events: none;
+}
+.splash-mark { font: 700 44px/1 var(--font-head); letter-spacing: .14em; color: var(--text); animation: splashIn .36s var(--ease) both; }
+.splash-sub { font-size: var(--fs-14); letter-spacing: .24em; color: var(--text-muted); animation: splashIn .36s var(--ease) .06s both; }
+#splash.splash-hide { opacity: 0; transition: opacity .22s ease-out; }
 
 /* ── scrollbar ────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: var(--bg-0); }
-::-webkit-scrollbar-thumb { background: var(--text-low); border-radius: 5px; border: 2px solid var(--bg-0); }
-::-webkit-scrollbar-thumb:hover { background: var(--text-mid); }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 5px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
-/* ── window sempit (<=1000px, min_size app 900px) ───────────────────
-   Split 2 kolom layar tool jatuh ke 1 kolom (status+summary di atas,
-   log di bawah); Settings 3 card → 1 kolom. Dashboard tetap 2 card
-   sejajar (konten pendek, muat di 900px). Konsisten dengan pola
-   breakpoint lama (dulu dipakai .sum-row 5→3 kolom). */
-@media (max-width: 1000px) {
-  .split { grid-template-columns: 1fr; }
-  .split-left { overflow: visible; }
-  .settings-grid { grid-template-columns: 1fr; }
+/* ── jendela sempit ───────────────────────────────────────────────── */
+@media (max-width: 1040px) {
+  .hd-sub { display: none; }
+  .main { padding: 20px; }
+  .sum-card { padding: 12px; }
+  .sum-value { font-size: var(--fs-20); }
+  .dash-top { grid-template-columns: 1fr; }
 }
 
-/* ── POLISH LAYER (2026-08-21) — animasi fungsional + ambient ───────
-   Prinsip restraint: semua transisi 150-250ms ease-out; animasi hanya
-   utk feedback (pindah pilihan, klik, status bekerja, log streaming),
-   bukan dekorasi. Tidak ada delay fungsional — murni visual.
-   Geometri verifier pixel TIDAK berubah: warna border/fill sama,
-   glow amber hanya di LUAR tombol (opacity rendah), inset shadow
-   .sb-item.active tidak disentuh (active_shadow_runs bergantung padanya). */
+/* ── animasi (transform + opacity) ────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes ring { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(2.8); opacity: 0; } }
+@keyframes indet { from { transform: translateX(-110%); } to { transform: translateX(300%); } }
+@keyframes shimmer { to { transform: translateX(100%); } }
+@keyframes screenIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes alertIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes logIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeOut { to { opacity: 0; } }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes toastOut { to { opacity: 0; transform: translateY(8px); } }
+@keyframes splashIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
 
-/* ambient: radial gradient SANGAT halus di background utama — card
-   tetap flat solid (gradient di card = berisik). Delta max ±5/channel,
-   hampir tak terlihat. */
-body {
-  background-color: var(--bg-0);
-  background-image: radial-gradient(1100px 720px at 24% 8%, #10141B, transparent 70%);
-  background-attachment: fixed;
-}
-
-/* transisi universal kontrol: pindah pilihan/hover tidak instan */
-.btn, .sb-item, .input {
-  transition: background-color .15s ease-out, border-color .15s ease-out,
-              color .15s ease-out, filter .15s ease-out, transform .1s ease-out;
-}
-/* micro-interaction klik: scale-down sesaat (standar SaaS) */
-.btn:active { transform: scale(.98); }
-/* aksen aktif: glow amber subtle di tombol pilihan terpilih (mode/toko)
-   — blur kecil opacity rendah, BUKAN neon. Sidebar sengaja TANPA glow:
-   inset shadow amber item aktif dipakai verifier piksel. */
-.btn.choice.active { box-shadow: 0 0 10px rgba(255, 145, 66, .15); }
-
-/* perpindahan screen: fade+slide halus pada section yang MASUK
-   (.active toggle display — section lama hilang instan, yang baru
-   dianimasikan; tanpa refactor arsitektur show/hide) */
-.screen.active { animation: screenIn .18s ease-out; }
-@keyframes screenIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: none; }
-}
-
-/* banner sukses: fade + slide-down kecil saat muncul */
-.success-banner.show { animation: bannerIn .2s ease-out; }
-@keyframes bannerIn {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: none; }
-}
-
-/* status Running: dot berdenyut halus (indikasi bekerja). Status lain
-   statis. Warna/bentuk dot tidak berubah — verifier aman. */
-.tool-status.running::before { animation: statusPulse 1.5s ease-in-out infinite; }
-@keyframes statusPulse {
-  0%, 100% { opacity: .6; }
-  50%      { opacity: 1; }
-}
-
-/* baris log baru: fade-in polos saat di-append live (kelas .log-anim
-   dipasang HANYA di insert langsung dari Python — replay state per-mode
-   & layar Logs tidak menganimasi ulang seluruh isi) */
-#tool-log .log-anim { animation: logFade .2s ease-out; }
-@keyframes logFade { from { opacity: 0; } }
-
-/* progress-fill sudah punya transition width .2s (aturan lama) — nilai
-   real dari backend, durasi lebih panjang diizinkan (representasi waktu) */
-
-/* hormati preferensi OS: reduce motion -> semua animasi/transisi praktis
-   instan (durasi ~0, state akhir tetap benar) */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   BOPEL v1.1.0 UI POLISH — penambahan di atas layer lama; tidak ada
-   perubahan token/geometri yang mempengaruhi verifier piksel.
-   ═══════════════════════════════════════════════════════════════════ */
-
-/* sum-card nilai berwarna sesuai semantik (ok=hijau, beda/notfound=merah).
-   Nilai "--" saat kosong pun ikut berwarna — itu OK, petunjuk visual awal. */
-#sum-ok     .sum-value { color: var(--green); }
-#sum-beda   .sum-value { color: var(--red); }
-#sum-notfound .sum-value { color: var(--red); }
-
-/* sidebar tool running: dot berdenyut menggantikan bullet sb-new.
-   Sama-sama ::after + specificity — running di-load belakangan jadi menang. */
-.sb-item.running::after {
-  content: "";
-  position: absolute; right: var(--sp-3); top: 50%;
-  transform: translateY(-50%);
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--amber);
-  animation: statusPulse 1.5s ease-in-out infinite;
-}
-
-/* icon inline di sidebar tool item */
-.sb-item .sb-icon {
-  display: inline-flex; align-items: center;
-  flex-shrink: 0; opacity: .7; margin-right: var(--sp-1);
-  vertical-align: middle;
-  transition: opacity .15s ease-out;
-}
-.sb-item:hover .sb-icon,
-.sb-item.active .sb-icon { opacity: 1; }
-
-/* bar hint paste di bawah shot-previews */
-.shot-paste-hint {
-  display: flex; align-items: center; gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--bg-1); border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  font-size: var(--fs-small); color: var(--text-mid);
-}
-.hotkey-chip {
-  display: inline-flex; align-items: center;
-  padding: 1px var(--sp-2);
-  background: var(--bg-2); border: 1px solid var(--border);
-  border-radius: 4px;
-  font-family: var(--font-mono); font-size: var(--fs-micro);
-  color: var(--amber); white-space: nowrap; letter-spacing: .2px;
-}
-
-/* ── Splash screen (sekali per buka app; dihapus app.js setelah fade) ──
-   Background = gradient shell yang sama -> transisi ke layar utama tanpa
-   "kedip" perubahan warna dasar. pointer-events:none: murni lapisan
-   visual, tidak pernah menghalangi interaksi/app siap dipakai.
-   Reduced-motion: blok universal di atas sudah membuat entrance solid
-   instan + fade-out instan (durasi .01ms). */
-#splash {
-  position: fixed; inset: 0; z-index: 9999;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 10px;
-  background: radial-gradient(1100px 720px at 24% 8%, #10141B, var(--bg-0) 70%);
-  pointer-events: none;
-}
-.splash-mark {
-  font-size: 46px; font-weight: 800; letter-spacing: .14em;
-  color: var(--text-hi);
-  text-shadow: 0 0 26px rgba(255,145,66,.28), 0 0 60px rgba(255,145,66,.12);
-  animation: splashIn .36s ease-out both;
-}
-.splash-sub {
-  font-size: 13px; letter-spacing: .34em; color: var(--text-mid);
-  animation: splashIn .36s ease-out .06s both;
-}
-#splash.splash-hide { opacity: 0; transition: opacity .22s ease-out; }
-@keyframes splashIn {
-  from { opacity: 0; transform: scale(.96); }
-  to   { opacity: 1; transform: scale(1); }
+  .global-progress span, .progress.indeterminate .progress-fill { animation: none; width: 100%; }
 }

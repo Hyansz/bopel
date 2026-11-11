@@ -1,12 +1,12 @@
-"""Startup smoke test for BOPEL TUI.
+"""Startup smoke test for BOPEL Pywebview SPA.
 
-Ensures required TUI files exist and app can be imported / loaded successfully.
+Ensures required pywebview files exist and app can be loaded successfully.
 """
 import os
 import subprocess
 import sys
 
-def test_tui_files_exist():
+def test_pywebview_files_exist():
     required = [
         "main.py",
         "ui/app.py",
@@ -31,7 +31,7 @@ def test_tui_files_exist():
         "core/window.py",
     ]
     missing = [p for p in required if not os.path.exists(p)]
-    assert not missing, f"Missing required TUI files: {missing}"
+    assert not missing, f"Missing required Pywebview files: {missing}"
 
 def test_import_ui_app():
     code = (
@@ -58,7 +58,7 @@ def test_config_and_modes():
     assert "Scan Detail" in mode_names
 
 if __name__ == "__main__":
-    test_tui_files_exist()
+    test_pywebview_files_exist()
     test_import_ui_app()
     test_config_and_modes()
-    print("✅ Startup smoke test TUI PASS")
+    print("✅ Startup smoke test Pywebview PASS")

@@ -1,0 +1,273 @@
+"""Module implementing global hotkey for automatic paste of screenshot + caption.
+Only registers when enabled in config.yaml (paste_macro.enabled).
+Uses ctypes windll.user32 RegisterHotKey in a background thread with dedicated message loop.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+import glob
+import os
+import ctypes
+from ctypes import wintypes
+
+from core.config import Config
+from core.clipboard import salin_paket, salin_teks
+from core.store_name import nama_toko_dari_file
+
+# Win32 user32 bindings via ctypes
+user32 = ctypes.windll.user32
+
+user32.RegisterHotKey.argtypes = [wintypes.HWND, wintypes.INT, wintypes.UINT, wintypes.UINT]
+user32.RegisterHotKey.restype = wintypes.BOOL
+user32.UnregisterHotKey.argtypes = [wintypes.HWND, wintypes.INT]
+user32.UnregisterHotKey.restype = wintypes.BOOL
+user32.GetAsyncKeyState.argtypes = [wintypes.INT]
+user32.GetAsyncKeyState.restype = wintypes.SHORT
+user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, ctypes.c_void_p]
+user32.keybd_event.restype = None
+user32.VkKeyScanW.argtypes = [wintypes.WCHAR]
+user32.VkKeyScanW.restype = wintypes.SHORT
+user32.GetMessageW.argtypes = [ctypes.POINTER(ctypes.c_long), wintypes.HWND, wintypes.UINT, wintypes.UINT]
+user32.GetMessageW.restype = wintypes.BOOL
+user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user32.PostThreadMessageW.restype = wintypes.BOOL
+
+MOD_CONTROL = 0x0002
+MOD_ALT = 0x0001
+MOD_SHIFT = 0x0004
+MOD_WIN = 0x0008
+MOD_NOREPEAT = 0x4000
+WM_HOTKEY = 0x0312
+VK_CONTROL = 0x11
+VK_MENU = 0x12
+VK_SHIFT = 0x10
+
+_hotkey_id_counter = 0
+_running_sequence_thread = None
+_cancel_event = threading.Event()
+_registered_ids = []
+
+
+def _safe_print(msg: str):
+    """Print ASCII-only or encode safely to avoid UnicodeEncodeError."""
+    try:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+    except Exception:
+        pass
+
+
+def _wait_for_modifiers_released():
+    start = time.time()
+    while time.time() - start < 3.0:
+        ctrl = bool(user32.GetAsyncKeyState(VK_CONTROL) & 0x8000)
+        alt = bool(user32.GetAsyncKeyState(VK_MENU) & 0x8000)
+        shift = bool(user32.GetAsyncKeyState(VK_SHIFT) & 0x8000)
+        if not (ctrl or alt or shift):
+            break
+        time.sleep(0.05)
+
+
+def _send_ctrl_v():
+    user32.keybd_event(VK_CONTROL, 0, 0, 0)
+    time.sleep(0.02)
+    user32.keybd_event(ord('V'), 0, 0, 0)
+    time.sleep(0.03)
+    user32.keybd_event(ord('V'), 0, 0x0002, 0) # KEYEVENTF_KEYUP = 0x0002
+    time.sleep(0.02)
+    user32.keybd_event(VK_CONTROL, 0, 0x0002, 0)
+    time.sleep(0.03)
+
+
+def _paste_sequence():
+    global _running_sequence_thread, _cancel_event
+    if _running_sequence_thread and _running_sequence_thread.is_alive():
+        _safe_print("[paste_macro] Hotkey ditekan saat urutan masih berjalan — diabaikan.")
+        return
+
+    def run_seq():
+        _cancel_event.clear()
+        _safe_print("[paste_macro] Hotkey ditekan: memulai urutan paste otomatis.")
+        _wait_for_modifiers_released()
+
+        files = sorted(glob.glob('logs/screenshots/iklan/*.png'))
+        if not files:
+            _safe_print("[paste_macro] belum ada screenshot untuk paste")
+            return
+
+        cfg = Config.ensure_loaded()
+        macro_cfg = cfg.get('paste_macro', {})
+        delay_img = macro_cfg.get('delay_setelah_gambar', 1.5)
+        delay_toko = macro_cfg.get('delay_antar_toko', 1.0)
+
+        for idx, path in enumerate(files):
+            if _cancel_event.is_set():
+                _safe_print("[paste_macro] Urutan paste dibatalkan oleh user.")
+                break
+
+            store_name = nama_toko_dari_file(path) or os.path.splitext(os.path.basename(path))[0]
+            caption = f"Shopee Ads {store_name} {time.strftime('%m %d %Y')}"
+            _safe_print(f"  [{idx+1}/{len(files)}] Memproses toko: {store_name}")
+
+            salin_paket('B', [path], "")
+            time.sleep(0.15)
+            if _cancel_event.is_set(): break
+            _send_ctrl_v()
+
+            elapsed = 0.0
+            step = 0.1
+            while elapsed < delay_img:
+                if _cancel_event.is_set(): break
+                time.sleep(step)
+                elapsed += step
+
+            if _cancel_event.is_set(): break
+
+            salin_teks(caption)
+            time.sleep(0.15)
+            if _cancel_event.is_set(): break
+            _send_ctrl_v()
+
+            elapsed = 0.0
+            while elapsed < delay_toko:
+                if _cancel_event.is_set(): break
+                time.sleep(step)
+                elapsed += step
+
+        _safe_print("[paste_macro] Urutan paste selesai.")
+
+    _running_sequence_thread = threading.Thread(target=run_seq, daemon=True)
+    _running_sequence_thread.start()
+
+
+def _cancel_sequence():
+    _safe_print("[paste_macro] Hotkey pembatalan ditekan.")
+    _cancel_event.set()
+
+
+def _parse_hotkey(hotkey_str: str) -> tuple[int, int]:
+    parts = hotkey_str.split('+')
+    mods = 0
+    key_char = 'V'
+    for part in parts:
+        p = part.strip().lower()
+        if p == 'ctrl':
+            mods |= MOD_CONTROL
+        elif p == 'alt':
+            mods |= MOD_ALT
+        elif p == 'shift':
+            mods |= MOD_SHIFT
+        elif p in ('win', 'windows', 'cmd'):
+            mods |= MOD_WIN
+        else:
+            key_char = part.strip().upper()
+    vk = ord(key_char[0])
+    return mods, vk
+
+
+def _register_hotkeys_thread(hotkey_defs: list[tuple[int, int, callable]]):
+    """Thread tunggal yang mendaftarkan SEMUA hotkey dan menjalankan loop GetMessageW."""
+    def msg_loop():
+        global _registered_ids
+        registered_local = []
+        for mods, vk, cb in hotkey_defs:
+            global _hotkey_id_counter
+            _hotkey_id_counter += 1
+            hid = _hotkey_id_counter
+            flags = mods | MOD_NOREPEAT
+            res = user32.RegisterHotKey(None, hid, flags, vk)
+            if res:
+                _safe_print(f"[paste_macro] terdaftar hotkey id {hid}")
+                # registration succeeded, keep record
+                pass
+            else:
+                err = ctypes.GetLastError()
+                _safe_print(f"[paste_macro] GAGAL daftar hotkey id {hid} (error {err})")
+            
+            # Re-eval check per instruction: tulis 'terdaftar' HANYA bila RegisterHotKey nonzero
+            if res != 0:
+                registered_local.append((hid, cb))
+                _registered_ids.append(hid)
+
+        if not registered_local:
+            _safe_print("[paste_macro] Tidak ada hotkey yang berhasil didaftarkan.")
+            return
+
+        try:
+            msg = (ctypes.c_long * 7)()
+            while user32.GetMessageW(ctypes.cast(msg, ctypes.POINTER(ctypes.c_long)), None, 0, 0) != 0:
+                # msg structure: hwnd(0), message(1), wParam(2), lParam(3), time(4), pt.x(5), pt.y(6)
+                if msg[1] == WM_HOTKEY:
+                    hid_hit = msg[2]
+                    for hid, cb in registered_local:
+                        if hid == hid_hit:
+                            cb()
+        finally:
+            for hid, _ in registered_local:
+                user32.UnregisterHotKey(None, hid)
+
+    t = threading.Thread(target=msg_loop, daemon=True)
+    t.start()
+    return t
+
+
+def init_hotkey():
+    try:
+        cfg = Config.ensure_loaded()
+        macro_cfg = cfg.get('paste_macro', {})
+        if not macro_cfg.get('enabled', False):
+            return
+
+        hotkey_defs = []
+        # Main hotkey
+        hotkey_str = macro_cfg.get('hotkey', 'Ctrl+Alt+V')
+        mods, vk = _parse_hotkey(hotkey_str)
+        main_registered = False
+
+        # Try main hotkey first
+        # We will test registration in thread; to know if main failed and try cadangan,
+        # we can pre-test via temporary register or handle inside thread.
+        # Instruction: cadangan hanya bila utama gagal.
+        # Let's test registration of main synchronously:
+        test_id = 9999
+        if user32.RegisterHotKey(None, test_id, mods | MOD_NOREPEAT, vk):
+            user32.UnregisterHotKey(None, test_id)
+            hotkey_defs.append((mods, vk, _paste_sequence))
+            main_registered = True
+        else:
+            err = ctypes.GetLastError()
+            _safe_print(f"[paste_macro] GAGAL daftar {hotkey_str} (error {err})")
+
+        if not main_registered:
+            cadangan_list = macro_cfg.get('hotkey_cadangan', [])
+            for cad in cadangan_list:
+                c_mods, c_vk = _parse_hotkey(cad)
+                if user32.RegisterHotKey(None, test_id, c_mods | MOD_NOREPEAT, c_vk):
+                    user32.UnregisterHotKey(None, test_id)
+                    hotkey_defs.append((c_mods, c_vk, _paste_sequence))
+                    _safe_print(f"[paste_macro] Menggunakan hotkey cadangan: {cad}")
+                    break
+                else:
+                    err = ctypes.GetLastError()
+                    _safe_print(f"[paste_macro] GAGAL daftar cadangan {cad} (error {err})")
+
+        # Always register cancel hotkey Ctrl+Alt+X
+        cancel_mods, cancel_vk = _parse_hotkey('Ctrl+Alt+X')
+        hotkey_defs.append((cancel_mods, cancel_vk, _cancel_sequence))
+
+        if hotkey_defs:
+            _register_hotkeys_thread(hotkey_defs)
+    except Exception as exc:
+        _safe_print(f"[paste_macro] Error in init_hotkey: {exc}")
+
+
+# Cleanup on exit
+import atexit
+@atexit.register
+def _cleanup_all():
+    for hid in _registered_ids:
+        try:
+            user32.UnregisterHotKey(None, hid)
+        except Exception:
+            pass

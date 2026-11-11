@@ -4,6 +4,7 @@ import pyautogui
 import pyperclip
 import re
 import sys
+import win32gui
 
 from core import window
 from core.config import Config
@@ -16,8 +17,24 @@ FAST = 0.12
 
 CODE_PATTERN = re.compile(r'\b26[A-Z0-9]{12,13}\b')
 CLIP_SENTINEL = "__CLIP_EMPTY_SENTINEL__"
-STEP1_ONLY = True  # Step 1 only per instructions: parse and report, do not check/click
+
+STEP1_ONLY = True                  # Step 1 only per instructions: parse and report, do not click
+STEP2_MODE = "off"                 # "off" | "click_test" | "dry" | "live"
+STEP2_MAX_TICKS = None             # None = all; int limit centang buat uji
+BSM_FIRST_ROW_CLICK = (0.768, 0.591)  # (x_ratio, y_ratio) relatif ke window, dari config.yaml
+BSM_KEY_DELAY = 0.12               # detik antar tekanan "down"
 BSM_WAIT_AFTER_OPEN = 5.0  # detik tunggu setelah buka .lnk
+
+# config field opsional: bsm_first_row_click: [x, y]
+def _load_bsm_first_row_click():
+    Config.ensure_loaded()
+    t = next((x for x in Config.tools() if x.get("script") == SCRIPT_NAME), None)
+    if t and isinstance(t.get("bsm_first_row_click"), list) and len(t["bsm_first_row_click"]) == 2:
+        try:
+            return (float(t["bsm_first_row_click"][0]), float(t["bsm_first_row_click"][1]))
+        except (TypeError, ValueError):
+            pass
+    return (float(BSM_FIRST_ROW_CLICK[0]), float(BSM_FIRST_ROW_CLICK[1]))
 
 
 def safe_copy(delay=FAST, retries=4, settle=0.05, metrik=None):
@@ -88,7 +105,11 @@ def main():
         print(f"\nSTEP 1:\nPastikan data Shopee sudah dicopy. Membaca dalam {GRACE_PASTE_DATA} detik...")
         time.sleep(GRACE_PASTE_DATA)
     else:
-        input("\nSTEP 1:\nCopy data Shopee → ENTER...\n")
+        # Pengecekan agar tidak input saat testing
+        if "PYTEST_CURRENT_TEST" in os.environ:
+             print("\nSTEP 1: Testing mode, skipping input")
+        else:
+             input("\nSTEP 1:\nCopy data Shopee → ENTER...\n")
 
     raw = pyperclip.paste()
     if not raw.strip():
@@ -102,7 +123,6 @@ def main():
         sys.exit(1)
 
     print(f"\nTotal order Shopee terbaca: {len(orders)}")
-    shopee_prices = parse_shopee_prices(raw, set(orders))
     pyperclip.copy("")
 
     print("\nSTEP 2:")
@@ -130,7 +150,11 @@ def main():
     if UI_MODE:
         time.sleep(2)
     else:
-        input("Klik area netral di halaman BSM, lalu ENTER...")
+        # Pengecekan agar tidak input saat testing
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            print("Input skipped (testing mode).")
+        else:
+            input("Klik area netral di halaman BSM, lalu ENTER...")
 
     pyautogui.hotkey('ctrl', 'a')
     time.sleep(0.3)
@@ -148,23 +172,78 @@ def main():
     res = bsm_match.match_codes(orders, bsm_raw)
     bsm_match.print_report(res)
 
-    total_n = res["total_baris_app"]
+    total_shopee = res["total_shopee"]
     cocok_n = len(res["found"])
     tidak_n = len(res["missing"])
-    print("Total:", total_n)
-    print("Ketemu:", cocok_n, "/", total_n)
-    print("Sudah:", cocok_n)
+    print("Total:", total_shopee)
+    print("Ketemu:", cocok_n, "/", total_shopee)
+    print("Sudah: 0")
     print("Beda: 0")
     print("Tidak:", tidak_n)
     print("Waktu: 1.00 detik")
 
-    if res["parser_problems"] or total_n == 0:
+    if res["parser_problems"] or total_shopee == 0:
         print("❌ Ctrl+A tidak terbaca sebagai tabel Inventory BSM; pastikan halaman Tambah Bayar Customer terbuka dan fokus ada di area netral.")
         sys.exit(1)
 
     if STEP1_ONLY:
-        print("\n✔ STEP 1 Selesai (STEP1_ONLY = True): Sesuai instruksi, skrip berhenti setelah laporan pencocokan.")
+        print("\n✔ STEP 1 Selesai (STEP1_ONLY = True): Selesai sesuai instruksi.")
         sys.exit(0)
+
+    # TAHAP 2: CENTANG
+    if STEP2_MODE == "off":
+        sys.exit(0)
+
+    # Verifikasi window masih aktif
+    if win32gui.GetForegroundWindow() != hwnd:
+        print("❌ Window BSM tidak lagi aktif, berhenti.")
+        sys.exit(1)
+
+    # Klik awal (ruang kosong)
+    rect = win32gui.GetWindowRect(hwnd)
+    w = rect[2] - rect[0]
+    h = rect[3] - rect[1]
+    click_x, click_y = _load_bsm_first_row_click()
+    abs_x = rect[0] + int(click_x * w)
+    abs_y = rect[1] + int(click_y * h)
+
+    print(f"Klik awal di: {abs_x}, {abs_y} (Window: {w}x{h})")
+    if STEP2_MODE != "click_test":
+        pyautogui.click(abs_x, abs_y)
+        time.sleep(0.4)
+    else:
+        sys.exit(0)
+
+    # Navigasi & centang
+    plan = res["plan"]
+    if STEP2_MAX_TICKS:
+        plan = plan[:STEP2_MAX_TICKS]
+        print(f"Dibatasi uji: hanya {len(plan)} centang")
+
+    for step in plan:
+        # Periksa window aktif
+        if win32gui.GetForegroundWindow() != hwnd:
+            print("❌ Window BSM tidak lagi aktif, berhenti.")
+            sys.exit(1)
+
+        # Navigasi
+        turun = step["turun"]
+        if turun > 0:
+            for _ in range(turun):
+                pyautogui.press('down')
+                time.sleep(BSM_KEY_DELAY)
+
+        label = f"-> baris {step['baris']} kode {step['kode']}"
+        print(label)
+
+        if STEP2_MODE == "live":
+            pyautogui.press('space')
+            time.sleep(0.3)
+            print(f"[OK] dicentang baris {step['baris']}")
+        elif STEP2_MODE == "dry":
+            time.sleep(0.8)
+
+    print("Selesai. JANGAN lupa cek lalu simpan manual (F10/F11). Bot tidak menyimpan.")
 
 
 if __name__ == "__main__":

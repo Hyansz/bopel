@@ -304,12 +304,12 @@ def persiapkan_window_target(script_name: str, required: bool = False):
     """
     title = target_window_title(script_name)
     if not title:
-        print(f"⚠ config.yaml: 'target_window_title' kosong untuk {script_name} "
+        print(f"[WARN] config.yaml: 'target_window_title' kosong untuk {script_name} "
               "-> aktivasi window otomatis di-skip (alt-tab manual seperti lama).")
         return None
 
     if not is_windows():
-        print(f"⚠ Bukan Windows -> aktivasi window otomatis di-skip untuk {script_name}.")
+        print(f"[WARN] Bukan Windows -> aktivasi window otomatis di-skip untuk {script_name}.")
         return None
 
     print(f"🔎 Mencari window aplikasi warehouse '{title}'...")
@@ -326,8 +326,7 @@ def persiapkan_window_target(script_name: str, required: bool = False):
 
     hwnd, nama_window = ketemu
     if activate_window(hwnd):
-        print(f"✔ Window '{nama_window}' diaktifkan otomatis — fokus pindah ke aplikasi warehouse.")
+        print(f"[OK] Window '{nama_window}' diaktifkan otomatis — fokus pindah ke aplikasi warehouse.")
     else:
-        print(f"⚠ Window '{nama_window}' ketemu tapi GAGAL di-aktifkan otomatis "
-              "(Windows foreground-lock). Klik manually window-nya kalau perlu.")
+        print(f"[WARN] Window '{nama_window}' ketemu tapi GAGAL di-aktifkan otomatis (Windows foreground-lock). Klik manually window-nya kalau perlu.")
     return hwnd

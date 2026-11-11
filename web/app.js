@@ -1,64 +1,162 @@
 "use strict";
 
 /* ═══════════════════════════════════════════════════════════════════
-   BOPEL Automation Toolkit — front-end pywebview (SPA)
+   BOPEL Automation Toolkit 2.0 — front-end pywebview (SPA)
    Navigasi antar screen murni JS (show/hide section), tanpa reload.
-   Fase 0: data placeholder (DEFAULT_TOOLS) — Fase 1 diganti dari
-   bridge get_config() (core/config.py). Semua fungsi ditulis agar
-   bisa di-extend fase berikutnya, bukan di-rewrite.
+
+   KONTRAK JS <-> PYTHON (JANGAN diubah namanya / urutan argumennya):
+   Dipanggil Python (evaluate_js):
+     appendLogLine(key, line)          updateSummaryCards(key, s)
+     onToolStarted(key)                onToolFinished(key, success, error, banner)
+     pushItems(key, items)             showScreenshotPreviews(key, items)
+   Method Api yang dipanggil JS:
+     get_config, start_tool(script, key), stop_tool(script),
+     set_active_store(name, start, end), copy_text, get_logs,
+     get_system_info, get_settings_info, exit_app
    ═══════════════════════════════════════════════════════════════════ */
 
-/* ── placeholder sementara (Fase 1: window.pywebview.api.get_config()) ── */
 const DEFAULT_TOOLS = [
   { name: "Checklist Automation", script: "check.py",
     description: "Checklist pesanan dan validasi harga Shopee vs aplikasi" },
   { name: "Inventory Scanner", script: "scan.py",
     description: "Scan status pembayaran dan validasi Excel" },
 ];
-
-const APP_META = { name: "Bopel Automation Toolkit", version: "1.0.0", subtitle: "Internal Warehouse Utilities" };
+const APP_META = { name: "Bopel Automation Toolkit", version: "2.0.0", subtitle: "Internal Warehouse Utilities" };
 
 const $ = (sel) => document.querySelector(sel);
+const REDUCE_MOTION = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
 
-/* tools dari config — Fase 1 mengisi ini dari bridge */
+/* ── ikon SVG inline (tanpa jaringan) ─────────────────────────────── */
+const IC = {
+  checklist: '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+  scan: '<path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>',
+  doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  exit: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  tick: '<polyline class="draw" pathLength="1" points="20 6 9 17 4 12"/>',
+  cross: '<line class="draw" pathLength="1" x1="18" y1="6" x2="6" y2="18"/><line class="draw" pathLength="1" x1="6" y1="6" x2="18" y2="18"/>',
+  play: '<polygon points="7 4 20 12 7 20 7 4"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>',
+  info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>',
+  terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+  dot: '<circle cx="12" cy="12" r="9"/>',
+};
+function svg(name, size = 18, cls = "") {
+  return `<svg ${cls ? `class="${cls}" ` : ""}viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[name] || IC.dot}</svg>`;
+}
+const TOOL_ICON = { "check.py": "checklist", "check_new.py": "checklist", "screenshot_iklan.py": "image", "scan.py": "scan" };
+function hydrateIcons() {
+  document.querySelectorAll("[data-icon]").forEach((el) => {
+    el.innerHTML = svg(el.dataset.icon, Number(el.dataset.size) || 18);
+  });
+}
+
+/* ── state global ─────────────────────────────────────────────────── */
 let TOOLS = DEFAULT_TOOLS;
-let currentTool = null;   // { name, script, description }
-/* toko Auto-Fetch Shopee (2026-08-19) — dari config.yaml stores: */
+let currentTool = null;          // { name, script, description, ... }
 let STORES = [];
-let storeChoice = null;   // nama toko terpilih (default: store enabled pertama)
-/* mode data Checklist Automation (2026-08-19): "manual" | "otomatis" | null.
-   WAJIB dipilih user sebelum Start aktif — tidak ada default diam-diam. */
-let dataMode = null;
+let storeChoice = null;
+let dataMode = null;             // "manual" | "otomatis" | null (wajib dipilih)
+let CONFIG = null;               // salinan get_config (untuk makro paste)
+let fetchRange = null;
+const lastRun = {};              // script -> { ok, at } (hasil terakhir sesi ini)
+const unseen = {};               // script -> "done" | "fail" (badge sidebar)
+
+/* ── util kecil ───────────────────────────────────────────────────── */
+function escHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function pad2(n) { return String(n).padStart(2, "0"); }
+function fmtElapsed(t) {
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  return `${pad2(Math.floor(s / 60))}:${pad2(s % 60)}`;
+}
+function fmtClock(d) { return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+function baseScript(key) {
+  const s = String(key).split("::")[0];
+  return s === "shopee_fetch.py" ? "check.py" : s;
+}
+function toolNameOf(key) {
+  const raw = String(key).split("::")[0];
+  if (raw === "shopee_fetch.py") return "Fetch Shopee";
+  const t = TOOLS.find((x) => x.script === raw);
+  return t ? t.name : raw;
+}
+function hotkeyText() { return (CONFIG && CONFIG.paste_macro && CONFIG.paste_macro.hotkey) || "Ctrl+Alt+V"; }
+function bridgeApi() { return window.pywebview && window.pywebview.api; }
+
+function showToast(text, kind = "info", ms = 2400) {
+  const root = $("#toast-root");
+  if (!root) return;
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.innerHTML = `<span class="toast-ic">${svg(kind === "error" ? "cross" : kind === "success" ? "tick" : "info", 16)}</span><span></span>`;
+  t.lastChild.textContent = text;
+  root.appendChild(t);
+  while (root.children.length > 3) root.firstChild.remove();
+  setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 220); }, ms);
+}
 
 /* ── sidebar ──────────────────────────────────────────────────────── */
 function renderSidebar(tools) {
   const box = $("#sidebar-tools");
   box.innerHTML = "";
-  const icons = {
-    "check.py": '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>',
-    "screenshot_iklan.py": '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>',
-    "scan.py": '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"></path><path d="M9 20h6"></path><path d="M12 4v16"></path></svg>'
-  };
   for (const t of tools) {
     const btn = document.createElement("button");
     btn.className = "sb-item";
     btn.dataset.nav = "tool";
     btn.dataset.script = t.script;
-    const iconSvg = icons[t.script] || '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>';
-    btn.innerHTML = `<span class="sb-icon">${iconSvg}</span><span>${t.name}</span>`;
+    btn.title = t.name;
+    btn.setAttribute("aria-label", t.name);
+    btn.innerHTML =
+      `<span class="sb-icon">${svg(TOOL_ICON[t.script] || "dot")}</span>` +
+      `<span class="sb-label">${escHtml(t.name)}</span>` +
+      `<span class="sb-state" aria-hidden="true"><i class="pulse-dot"></i>${svg("tick", 16, "st-ok")}${svg("cross", 16, "st-fail")}</span>`;
+    if (currentTool && currentTool.script === t.script && isSectionActive("tool")) btn.classList.add("active");
     box.appendChild(btn);
   }
+  refreshSidebarStates();
 }
 
 function setActiveNav(btn) {
-  document.querySelectorAll(".sb-item").forEach((b) => b.classList.remove("active"));
-  if (btn) btn.classList.add("active");
+  document.querySelectorAll(".sb-item").forEach((b) => { b.classList.remove("active"); b.removeAttribute("aria-current"); });
+  if (btn) { btn.classList.add("active"); btn.setAttribute("aria-current", "page"); }
 }
 
 function showSection(name) {
   document.querySelectorAll(".screen").forEach((s) => s.classList.remove("active"));
   const section = document.querySelector(`.screen[data-section="${name}"]`);
   if (section) section.classList.add("active");
+  const main = $("#main");
+  if (main) main.scrollTop = 0;
+}
+
+function isSectionActive(name) {
+  const s = document.querySelector(`.screen[data-section="${name}"]`);
+  return !!(s && s.classList.contains("active"));
+}
+
+/* indikator per tool di sidebar + garis progres global + chip header */
+function refreshSidebarStates() {
+  let running = 0;
+  for (const st of Object.values(toolStates)) if (st.running) running++;
+  document.querySelectorAll('.sb-item[data-nav="tool"]').forEach((btn) => {
+    const sc = btn.dataset.script;
+    const isRun = Object.entries(toolStates).some(([k, st]) => st.running && baseScript(k) === sc);
+    btn.dataset.state = isRun ? "running" : (unseen[sc] || "");
+  });
+  document.body.classList.toggle("is-running", running > 0);
+  const hr = $("#hd-running");
+  if (hr) {
+    hr.classList.toggle("hidden", running === 0);
+    $("#hd-running-text").textContent = running === 1 ? "1 proses berjalan" : `${running} proses berjalan`;
+  }
+  if (isSectionActive("dashboard")) renderDashboardTools();
 }
 
 /* ── navigasi ─────────────────────────────────────────────────────── */
@@ -73,10 +171,8 @@ function onNavClick(e) {
     if (!tool) return;
     currentTool = tool;
     setActiveNav(btn);
-    btn.classList.remove("sb-new"); // hasil tool ini sudah dilihat
-    // Kelompok B/D: render state MILIK tool ini (dan mode terakhirnya
-    // kalau tool punya modes). Tool/mode yang belum pernah dijalankan →
-    // tampil KOSONG ("--", log kosong), BUKAN sisa state tool sebelumnya.
+    delete unseen[script];
+    refreshSidebarStates();
     renderToolHeader(tool);
     const hasModes = Array.isArray(tool.modes) && tool.modes.length > 0;
     if (hasModes && lastModeRun[tool.script]) {
@@ -92,6 +188,7 @@ function onNavClick(e) {
   } else if (nav === "dashboard") {
     setActiveNav(btn);
     showSection("dashboard");
+    renderDashboard();
     refreshSystemInfo();
   } else if (nav === "logs") {
     setActiveNav(btn);
@@ -102,24 +199,13 @@ function onNavClick(e) {
     showSection("settings");
     refreshSettings();
   } else if (nav === "exit") {
-    // Fase 2: bridge exit_app(); sekarang fallback no-op yang aman.
-    const api = window.pywebview && window.pywebview.api;
-    if (api && typeof api.exit_app === "function") {
-      api.exit_app();
-    } else {
-      console.log("[exit] bridge belum tersedia (Fase 2)");
-    }
+    const api = bridgeApi();
+    if (api && typeof api.exit_app === "function") api.exit_app();
+    else console.log("[exit] bridge belum tersedia");
   }
 }
 
-/* ── tool screen: Start/Stop + streaming (Fase 2/3) ──────────────────
-   STATE PER-TOOL (Kelompok B): tiap tool punya state sendiri
-   (toolStates[script]) — log, summary cards, banner, status, progress.
-   Streaming dari Python (appendLogLine/updateSummaryCards/onToolStarted/
-   onToolFinished) sekarang membawa nama script; JS simpan ke state tool
-   itu dan render ke DOM HANYA kalau tool itu lagi aktif. Pindah ke tool
-   lain yang belum pernah dijalankan → tampil KOSONG ("--", log kosong),
-   bukan sisa state tool sebelumnya. */
+/* ── state per-run (tool / mode) ──────────────────────────────────── */
 const toolStates = {};
 
 function toolStateOf(script) {
@@ -128,151 +214,300 @@ function toolStateOf(script) {
       logHtml: [],
       summary: { total: null, ok: null, beda: null, notfound: null, durasi: null },
       banner: null,
+      error: null,
       statusCls: "idle",
-      statusText: "Status: Idle",
+      statusText: "Siap",
       progress: 0,
       running: false,
       startedAt: null,
       stopRequested: false,
-      items: [],          // struktur per-item (salin per kolom), di-push sekali saat selesai
-      copyFilter: "ok",   // dropdown filter aktif per run state
-      screenshotFiles: [], // Screenshot Iklan: DAFTAR {path, uri} per toko (loop semua toko)
+      items: [],
+      copyFilter: "ok",
+      screenshotFiles: [],
+      shotIdx: 0,
     };
   }
   return toolStates[script];
 }
 
-/* Kelompok D — run key unik per (tool, mode): script yang sama bisa
-   dipakai beberapa mode (scan.py = Scan Kode Pesanan & Scan Detail), jadi
-   key-nya bukan cuma nama script. Python meng-echo key ini di semua
-   push JS (start_tool(script, run_key)). */
-function runKey(script, modeName) {
-  return modeName ? script + "::" + modeName : script;
+/* key unik per (tool, mode): scan.py dipakai 2 mode */
+function runKey(script, modeName) { return modeName ? script + "::" + modeName : script; }
+
+let activeRun = null;            // { key, script } yang sedang DITAMPILKAN
+const lastModeRun = {};          // tool.script -> nama mode terpilih / terakhir
+
+function isActiveRun(key) { return !!(activeRun && activeRun.key === key && isSectionActive("tool")); }
+
+function failRun(st, msg) {
+  st.statusCls = "failed";
+  st.statusText = "Gagal";
+  st.error = msg || "Penyebab tidak diketahui.";
+  st.progress = 0;
+  st.running = false;
+  st.startedAt = null;
 }
 
-/* run yang sedang DITAMPILKAN — { key, script } (script = file yang
-   benar-benar dijalankan; untuk mode bisa beda dari currentTool.script). */
-let activeRun = null;
-/* tool.script -> nama mode terakhir yang ditampilkan (retensi per mode) */
-const lastModeRun = {};
-
-function isActiveRun(key) {
-  return activeRun && activeRun.key === key && isSectionActive("tool");
-}
-
-function bridgeApi() {
-  return window.pywebview && window.pywebview.api;
+/* ── status chip, progres, tombol ─────────────────────────────────── */
+function leadIcon(cls) {
+  if (cls === "running") return '<i class="pulse-dot"></i>';
+  if (cls === "finished") return svg("tick", 16);
+  if (cls === "failed") return svg("cross", 16);
+  if (cls === "stopped") return svg("stop", 14);
+  return '<i class="idle-dot"></i>';
 }
 
 function setStatus(cls, text) {
   const el = $("#tool-status");
-  el.className = "tool-status " + cls;
-  el.textContent = text;
+  if (el.dataset.cls !== cls) {          // ikon digambar ulang hanya saat status berganti
+    el.dataset.cls = cls;
+    el.className = "status-chip tool-status " + cls;
+    $("#tool-status-lead").innerHTML = leadIcon(cls);
+  }
+  $("#tool-status-text").textContent = text;
 }
 
-/* Mode lain di-disable selama ada run tool ini yang masih jalan,
-   biar gak muncul "Gagal start" (launcher menolak tool yang running).
-   Dipanggil dari renderToolHeader & renderRun (biar ke-enable lagi
-   saat run selesai). Tombol Fetch dari Shopee + tombol Mode (Manual/
-   Otomatis) ikut di-disable: fetch menimpa clipboard yang sedang
-   dibaca run tool yang jalan, dan ganti mode saat fetch jalan bikin
-   tampilan berantakan. */
+function statusLabel(st) {
+  if (!st) return "Siap";
+  if (st.statusCls === "running") return "Berjalan " + (st.startedAt ? fmtElapsed(st.startedAt) : "00:00");
+  return st.statusText || "Siap";
+}
+
+function setProgress(st) {
+  const wrap = $("#tool-progress-wrap");
+  const fill = $("#tool-progress");
+  const cls = st ? st.statusCls : "idle";
+  wrap.classList.toggle("indeterminate", cls === "running");
+  wrap.classList.toggle("done", cls === "finished");
+  wrap.classList.toggle("failed", cls === "failed");
+  fill.style.transform = cls === "running" ? "" : `scaleX(${cls === "finished" || cls === "failed" ? 1 : 0})`;
+}
+
+function startHint(st) {
+  if (st && st.running) return "";
+  const fetchSt = toolStates["shopee_fetch.py"];
+  if (fetchSt && fetchSt.running) return "Menunggu Fetch selesai";
+  if (currentTool && currentTool.uses_stores && STORES.length && !currentTool.date_range && !dataMode) return "Pilih mode dulu";
+  if (currentTool && Array.isArray(currentTool.modes) && currentTool.modes.length && !lastModeRun[currentTool.script]) return "Pilih mode dulu";
+  return "";
+}
+
+function startDisabled(st) {
+  if (st && st.running) return true;
+  if (toolStates["shopee_fetch.py"] && toolStates["shopee_fetch.py"].running) return true;
+  if (currentTool && currentTool.uses_stores && STORES.length && !currentTool.date_range && !dataMode) return true;
+  if (currentTool && Array.isArray(currentTool.modes) && currentTool.modes.length && !lastModeRun[currentTool.script]) return true;
+  return false;
+}
+
+function renderRunButtons(st) {
+  const running = !!(st && st.running);
+  const sb = $("#start-btn");
+  sb.disabled = startDisabled(st);
+  sb.classList.toggle("is-running", running);
+  $("#start-label").textContent = running ? "Berjalan" : "Start";
+  $("#start-ic").innerHTML = running ? '<span class="spinner"></span>' : svg("play", 14);
+  $("#stop-btn").disabled = !running;
+  const h = startHint(st);
+  const hint = $("#start-hint");
+  hint.textContent = h;
+  hint.classList.toggle("hidden", !h);
+}
+
+/* ── ringkasan (kartu metrik) ─────────────────────────────────────── */
+const SUM_FIELDS = [["total", "#sum-total"], ["ok", "#sum-ok"], ["beda", "#sum-beda"], ["notfound", "#sum-notfound"], ["durasi", "#sum-durasi"]];
+
+function paintMetric(field, el, v, loading) {
+  const card = el.closest(".sum-card");
+  card.classList.toggle("loading", !!loading);
+  card.classList.toggle("is-on", v != null && Number(v) > 0 && field !== "total" && field !== "durasi");
+}
+
+function renderSummary(st) {
+  for (const [f, sel] of SUM_FIELDS) {
+    const el = $(sel);
+    const v = st && st.summary[f] != null ? st.summary[f] : null;
+    if (el._raf) cancelAnimationFrame(el._raf);
+    el.textContent = v != null ? v : "--";
+    paintMetric(f, el, v, st && st.running && v == null);
+  }
+}
+
+function countUp(el, to) {
+  if (el._raf) cancelAnimationFrame(el._raf);
+  const t0 = performance.now(), dur = 450;
+  const step = (t) => {
+    const p = Math.min(1, (t - t0) / dur);
+    el.textContent = p < 1 ? Math.round(to * (1 - Math.pow(1 - p, 3))) : to;
+    if (p < 1) el._raf = requestAnimationFrame(step);
+  };
+  el._raf = requestAnimationFrame(step);
+}
+
+function setMetric(field, sel, v) {
+  const el = $(sel);
+  const n = Number(v);
+  if (!REDUCE_MOTION && Number.isInteger(n) && n > 0 && n < 100000 && String(v).trim() === String(n)) countUp(el, n);
+  else el.textContent = v;
+  paintMetric(field, el, v, false);
+}
+
+/* ── render satu run ke DOM ───────────────────────────────────────── */
+function renderRun(key) {
+  const st = key ? toolStateOf(key) : null;
+  const cls = st ? st.statusCls : "idle";
+  renderSummary(st);
+  setStatus(cls, statusLabel(st));
+  setProgress(st);
+
+  const b = $("#success-banner");
+  if (st && st.banner && cls === "finished") { $("#banner-text").textContent = st.banner; b.classList.add("show"); }
+  else b.classList.remove("show");
+  const ep = $("#error-panel");
+  if (st && cls === "failed") { $("#error-text").textContent = st.error || ""; ep.classList.remove("hidden"); }
+  else ep.classList.add("hidden");
+
+  const isShot = !!(currentTool && currentTool.script === "screenshot_iklan.py");
+  const sumRow = document.querySelector(".sum-row");
+  if (sumRow) sumRow.classList.toggle("hidden", isShot);
+
+  const logEl = $("#tool-log");
+  logEl.innerHTML = st ? st.logHtml.join("") : "";
+  $("#log-count").textContent = st && st.logHtml.length ? `${st.logHtml.length} baris` : "";
+  $("#log-empty-text").textContent = st && st.running
+    ? "Menunggu output pertama…"
+    : (startHint(st) === "Pilih mode dulu" ? "Belum ada output. Pilih mode lalu tekan Start." : "Belum ada output. Tekan Start untuk memulai.");
+  scrollLog(true);
+
+  renderRunButtons(st);
+  if (currentTool) refreshModeButtons(currentTool);
+  renderCopyBar(st);
+  renderScreenshotPreview(st);
+}
+
+/* auto-scroll log dengan tombol jeda */
+let logPaused = false;
+function scrollLog(force) {
+  const el = $("#tool-log");
+  if (force) setPaused(false);
+  if (!logPaused) el.scrollTop = el.scrollHeight;
+}
+function setPaused(v) {
+  logPaused = v;
+  $("#scroll-label").textContent = v ? "Lanjutkan gulir" : "Jeda gulir";
+  $("#scroll-ic").innerHTML = svg(v ? "play" : "pause", 14);
+  $("#scroll-toggle").setAttribute("aria-label", v ? "Lanjutkan gulir otomatis" : "Jeda gulir otomatis");
+}
+
+/* ── mode & kontrol ───────────────────────────────────────────────── */
 function refreshModeButtons(tool) {
   const running = Object.entries(toolStates).some(
     ([k, st]) => (k === tool.script || k.startsWith(tool.script + "::")) && st.running
   );
   const fetchRunning = !!(toolStates["shopee_fetch.py"] && toolStates["shopee_fetch.py"].running);
-  document.querySelectorAll("#mode-btns .btn.choice").forEach((b) => (b.disabled = running || fetchRunning));
-  const fb = $("#fetch-btn");
-  fb.disabled = running || fetchRunning;
+  document.querySelectorAll("#mode-btns .btn.choice, #data-mode-btns .btn.choice").forEach((b) => (b.disabled = running || fetchRunning));
+  $("#fetch-btn").disabled = running || fetchRunning;
 }
 
-/* header tool: judul/desc + tombol MODE (kalau tool punya modes di
-   config.yaml). Start disembunyikan saat ada modes (mode = aksi utama). */
-function renderToolHeader(tool) {
-  $("#tool-name").textContent = tool.name;
-  $("#tool-desc").textContent = tool.description || "";
-  const modeBox = $("#mode-btns");
+function syncZones() {
+  const modeHidden = $("#mode-btns").classList.contains("hidden") && $("#data-mode-btns").classList.contains("hidden");
+  $("#zone-mode").classList.toggle("hidden", modeHidden);
+  const srcHidden = $("#zone-source").classList.contains("hidden");
+  const help = $("#ctl-help");
+  $("#tool-toolbar").classList.toggle("hidden", modeHidden && srcHidden);
+  help.classList.toggle("hidden", !help.textContent || (modeHidden && srcHidden));
+}
+
+function setHelp(text) { $("#ctl-help").textContent = text || ""; syncZones(); }
+
+function updateHelp(tool) {
   const hasModes = Array.isArray(tool.modes) && tool.modes.length > 0;
   if (hasModes) {
-    modeBox.innerHTML = "";
+    const m = tool.modes.find((x) => x.name === lastModeRun[tool.script]);
+    setHelp(m ? (m.description || "") : "Pilih mode untuk melanjutkan.");
+  } else setHelp("");
+}
+
+function renderModeSeg(tool) {
+  const box = $("#mode-btns");
+  const hasModes = Array.isArray(tool.modes) && tool.modes.length > 0;
+  box.classList.toggle("hidden", !hasModes);
+  box.innerHTML = "";
+  if (hasModes) {
     for (const m of tool.modes) {
       const b = document.createElement("button");
-      b.className = "btn choice";
+      const on = m.name === lastModeRun[tool.script];
+      b.className = "btn choice" + (on ? " active" : "");
       b.textContent = m.name;
       b.title = m.description || "";
       b.dataset.modeName = m.name;
-      b.addEventListener("click", () => onModeClick(tool, m));
-      modeBox.appendChild(b);
+      b.setAttribute("role", "radio");
+      b.setAttribute("aria-checked", on ? "true" : "false");
+      b.addEventListener("click", () => selectMode(tool, m));
+      box.appendChild(b);
     }
-    modeBox.querySelectorAll(".btn.choice").forEach((b) =>
-      b.classList.toggle("active", b.dataset.modeName === lastModeRun[tool.script]));
-    refreshModeButtons(tool);
-    modeBox.classList.remove("hidden");
-    $("#start-btn").classList.add("hidden");
-  } else {
-    modeBox.classList.add("hidden");
-    $("#start-btn").classList.remove("hidden");
   }
+  refreshModeButtons(tool);
+}
+
+/* memilih mode TIDAK menjalankan apa pun — Start yang menjalankan */
+function selectMode(tool, mode) {
+  lastModeRun[tool.script] = mode.name;
+  const key = runKey(tool.script, mode.name);
+  activeRun = { key, script: mode.script || tool.script };
+  renderModeSeg(tool);
+  updateHelp(tool);
+  renderRun(key);
+}
+
+function renderToolHeader(tool) {
+  $("#tool-name").textContent = tool.name;
+  $("#tool-desc").textContent = tool.description || "";
+  renderModeSeg(tool);
   const usesStores = !!(tool.uses_stores && STORES.length);
-  /* ToolScreen dibuka -> mode data netral lagi (Start menunggu pilihan)
-     dan rentang tanggal reset ke default (hari ini, lihat renderDateRange). */
   if (usesStores) dataMode = null;
   fetchRange = null;
   refreshModeButtons(tool);
   renderDataModeButtons(tool);
   applyDataModeUI(tool);
+  updateHelp(tool);
 }
 
-/* ── pilihan MODE DATA Manual vs Otomatis (Checklist Automation) ─────
-   WAJIB dipilih user sebelum Start aktif — tidak ada default diam-diam.
-   Manual = alur lama persis (selector Toko + Fetch tersembunyi, Start
-   langsung aktif, shopee_fetch.py TIDAK dipanggil sama sekali).
-   Otomatis = selector Toko + Fetch muncul (perilaku Auto-Fetch yang
-   sudah dibangun); Start TETAP aktif — user yang putuskan kapan Start
-   (clipboard tetap divalidasi check.py di KEDUA mode). Ganti pilihan
-   sebelum Start = reset tampilan sesuai mode baru; clipboard yang sudah
-   ada TIDAK dihapus (keputusan pakai/copy-ulang di tangan user). */
 function renderDataModeButtons(tool) {
   const box = $("#data-mode-btns");
-  /* Screenshot Iklan: uses_stores tapi tanpa mode Manual/Otomatis →
-     sembunyikan tombol mode data (date_range langsung tampil). */
-  const needsDataMode = !!(tool && tool.uses_stores && STORES.length
-                          && (tool.modes?.length || (!tool.date_range)));
+  const needsDataMode = !!(tool && tool.uses_stores && STORES.length && (tool.modes?.length || (!tool.date_range)));
   box.classList.toggle("hidden", !needsDataMode);
-  if (!needsDataMode) return;
+  if (!needsDataMode) { syncZones(); return; }
   box.innerHTML = "";
   for (const [label, val] of [["Manual", "manual"], ["Otomatis", "otomatis"]]) {
     const b = document.createElement("button");
-    b.className = "btn choice";
+    b.className = "btn choice" + (dataMode === val ? " active" : "");
     b.textContent = label;
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", dataMode === val ? "true" : "false");
     b.title = val === "manual"
-      ? "Copy data Shopee sendiri, lalu klik Start (alur manual lama)"
-      : "Ambil data dari Chrome profile toko dulu (Fetch dari Shopee), lalu Start";
+      ? "Salin data Shopee sendiri, lalu klik Start"
+      : "Ambil data dari Chrome toko lewat Fetch, lalu klik Start";
     b.addEventListener("click", () => {
       dataMode = val;
       renderDataModeButtons(tool);
       applyDataModeUI(tool);
+      updateHelp(tool);
     });
-    if (dataMode === val) b.classList.add("active");
     box.appendChild(b);
   }
+  refreshModeButtons(tool);
+  syncZones();
 }
 
-/* tampilkan/sembunyikan selector Toko + rentang tanggal + Fetch sesuai
-   mode data aktif (Otomatis = ketiganya muncul, Manual = tersembunyi) */
 function applyDataModeUI(tool) {
   const hasStores = !!(tool && tool.uses_stores && STORES.length);
   const isAuto = dataMode === "otomatis" && hasStores;
-  /* Screenshot Iklan: uses_stores + date_range → hanya tanggal, TANPA
-     selector toko — toko di-loop otomatis 1→2→3 oleh screenshot_iklan.py
-     (set_active_store dikirim tanpa nama toko saat Start; script pilih
-     toko sendiri). Fetch disembunyikan (tool ini bukan fetch). */
   const noDataMode = hasStores && tool.date_range && !tool.modes?.length;
   const isShot = !!(noDataMode && currentTool && currentTool.script === "screenshot_iklan.py");
   const showZone = isAuto || noDataMode;
   $("#zone-source").classList.toggle("hidden", !showZone);
   $("#store-btns").classList.toggle("hidden", !showZone || isShot);
+  $("#store-group").classList.toggle("hidden", !showZone || isShot);
   $("#date-range").classList.toggle("hidden", !showZone);
   $("#fetch-btn").classList.toggle("hidden", !isAuto);
   if (showZone) {
@@ -280,34 +515,44 @@ function applyDataModeUI(tool) {
     renderDateRange();
   }
   refreshModeButtons(tool);
+  syncZones();
   renderRun(activeRun ? activeRun.key : null);
 }
 
-/* ── rentang TANGGAL (Auto-Fetch, 2026-08-19) ────────────────────────
-   Dua <input type="date"> (dari & sampai) sebelum tombol Fetch. Default
-   hari ini untuk keduanya (aman: fetch tanpa sadar = data hari ini,
-   bukan data salah besar). Reset tiap ToolScreen dibuka (renderToolHeader
-   set fetchRange = null) → kembali ke hari ini. Nilai dikirim ke bridge
-   set_active_store saat pilih toko & saat klik Fetch. */
-let fetchRange = null;
-
-function todayISO() {
+/* ── rentang tanggal ──────────────────────────────────────────────── */
+function isoOffset(days) {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  d.setDate(d.getDate() - days);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
+function todayISO() { return isoOffset(0); }
+
+const DATE_PRESETS = [["Hari ini", 0, 0], ["Kemarin", 1, 1], ["7 hari", 6, 0]];
 
 function renderDateRange() {
-  const box = $("#date-range");
-  /* VISIBILITAS diatur applyDataModeUI — di sini cuma isi value & handler.
-     (Jangan toggle ulang di sini: untuk Screenshot Iklan box sudah tampil
-     walau dataMode null.) */
   if (!fetchRange) fetchRange = { start: todayISO(), end: todayISO() };
-  const s = $("#date-start");
-  const e = $("#date-end");
+  const s = $("#date-start"), e = $("#date-end");
   s.value = fetchRange.start;
   e.value = fetchRange.end;
-  s.onchange = () => { fetchRange.start = s.value; };
-  e.onchange = () => { fetchRange.end = e.value; };
+  s.onchange = () => { fetchRange.start = s.value; renderDatePresets(); };
+  e.onchange = () => { fetchRange.end = e.value; renderDatePresets(); };
+  renderDatePresets();
+}
+
+function renderDatePresets() {
+  const box = $("#date-presets");
+  box.innerHTML = "";
+  for (const [label, a, b] of DATE_PRESETS) {
+    const btn = document.createElement("button");
+    const on = fetchRange && fetchRange.start === isoOffset(a) && fetchRange.end === isoOffset(b);
+    btn.className = "btn choice" + (on ? " active" : "");
+    btn.textContent = label;
+    btn.addEventListener("click", () => {
+      fetchRange = { start: isoOffset(a), end: isoOffset(b) };
+      renderDateRange();
+    });
+    box.appendChild(btn);
+  }
 }
 
 function currentDateRange() {
@@ -319,50 +564,30 @@ function pushActiveStore(api, name) {
   return api.set_active_store(name, r.start, r.end).catch(() => {});
 }
 
-/* Start ter-kunci sampai mode data dipilih (tool uses_stores) */
-function startDisabled(st) {
-  if (st && st.running) return true;
-  /* Jika fetch sedang berjalan, jangan bisa Start check.py — clipboard belum
-     siap, check.py akan baca data kosong/partial. Ini sebab "bot binggung"
-     setelah CTRL+L + paste link: user klik Start sebelum fetch selesai. */
-  if (toolStates["shopee_fetch.py"] && toolStates["shopee_fetch.py"].running) return true;
-  /* Screenshot Iklan: uses_stores + no modes → Start aktif tanpa pilih mode
-     data (selector toko + tanggal selalu tampil, lihat applyDataModeUI). */
-  if (currentTool && currentTool.uses_stores && STORES.length
-      && !currentTool.date_range && !dataMode) return true;
-  return false;
-}
-
-/* ── selector TOKO (Auto-Fetch Shopee) ───────────────────────────────
-   Dirender dari config.yaml stores: — semua toko enabled = tombol
-   pilihan (klik → simpan + kirim ke bridge set_active_store); toko
-   disabled = placeholder murni UI (disabled, tanpa logic backend).
-   Nambah toko = edit config stores: saja.
-   Screenshot Iklan TIDAK pakai selector ini (toko di-loop 1→2→3 oleh
-   screenshot_iklan.py — applyDataModeUI sembunyikan #store-btns). */
+/* ── selector toko ────────────────────────────────────────────────── */
 function renderStoreButtons(tool) {
   const box = $("#store-btns");
   const usesStores = !!(tool && tool.uses_stores && STORES.length);
   box.classList.toggle("hidden", !usesStores);
   if (!usesStores) return;
   box.innerHTML = "";
+  const chosen = storeChoice || (STORES.find((x) => x.enabled) || {}).name;
   for (const s of STORES) {
     const b = document.createElement("button");
-    b.className = "btn choice store";
-    b.textContent = s.name;
-    b.title = "Pilih toko ini sebagai sumber Auto-Fetch";
+    const on = s.enabled && s.name === chosen;
+    b.className = "btn choice store" + (on ? " active" : "");
+    b.textContent = shortStore(s.name);
+    b.title = s.name;
+    b.setAttribute("aria-label", "Pilih " + s.name);
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", on ? "true" : "false");
     if (!s.enabled) b.disabled = true;
     b.addEventListener("click", () => {
       storeChoice = s.name;
       renderStoreButtons(tool);
       const api = bridgeApi();
-      if (api && typeof api.set_active_store === "function") {
-        pushActiveStore(api, s.name);
-      }
+      if (api && typeof api.set_active_store === "function") pushActiveStore(api, s.name);
     });
-    if (s.enabled && s.name === (storeChoice || STORES.find((x) => x.enabled)?.name)) {
-      b.classList.add("active");
-    }
     box.appendChild(b);
   }
   if (!storeChoice) {
@@ -370,92 +595,93 @@ function renderStoreButtons(tool) {
     if (first) {
       storeChoice = first.name;
       const api = bridgeApi();
-      if (api && typeof api.set_active_store === "function") {
-        pushActiveStore(api, first.name);
-      }
+      if (api && typeof api.set_active_store === "function") pushActiveStore(api, first.name);
     }
   }
 }
 
-/* render state sebuah run ke DOM (key null = tampilan kosong) */
-function renderRun(key) {
-  const st = key ? toolStateOf(key) : null;
-  $("#sum-total").textContent = st && st.summary.total != null ? st.summary.total : "--";
-  $("#sum-ok").textContent = st && st.summary.ok != null ? st.summary.ok : "--";
-  $("#sum-beda").textContent = st && st.summary.beda != null ? st.summary.beda : "--";
-  $("#sum-notfound").textContent = st && st.summary.notfound != null ? st.summary.notfound : "--";
-  $("#sum-durasi").textContent = st && st.summary.durasi != null ? st.summary.durasi : "--";
-  const b = $("#success-banner");
-  if (st && st.banner) {
-    b.textContent = st.banner;
-    b.classList.add("show");
-  } else {
-    b.classList.remove("show");
-  }
-  setStatus(st ? st.statusCls : "idle", st ? st.statusText : "Status: Idle");
-  $("#tool-progress").style.width = (st ? st.progress : 0) + "%";
-  /* Screenshot Iklan: card ringkasan (TOTAL ITEM/SUKSES/CEK MANUAL/NOT
-     FOUND/DURASI) tidak relevan — tool ini output-nya screenshot, bukan
-     tabel scan. Hanya status+progress yang dipertahankan di kolom kiri.
-     Tool lain (Checklist/Scanner) tetap pakai cards seperti biasa. */
-  const sumRow = document.querySelector(".sum-row");
-  const isShot = currentTool && currentTool.script === "screenshot_iklan.py";
-  if (sumRow) sumRow.style.display = isShot ? "none" : "";
-  const logEl = $("#tool-log");
-  logEl.innerHTML = st ? st.logHtml.join("") : "";
-  logEl.scrollTop = logEl.scrollHeight;
-  $("#start-btn").disabled = startDisabled(st);
-  $("#stop-btn").disabled = st ? !st.running : true;
-  if (currentTool) refreshModeButtons(currentTool);
-  renderCopyBar(st);
-  renderScreenshotPreview(st);
+/* ── Screenshot Iklan: kartu per toko ─────────────────────────────── */
+const STORE_STATUS_TEXT = { wait: "Menunggu", proc: "Memproses", done: "Selesai", fail: "Gagal" };
+
+function shortStore(name) { return String(name).replace(/^Toko\s*\d+\s*[—–-]\s*/, "").trim(); }
+function fileKey(name) { return shortStore(name).replace(/\s+/g, "_").toLowerCase(); }
+
+function storeStatus(st, idx, hasFile) {
+  if (hasFile) return "done";
+  if (!st) return "wait";
+  if (st.statusCls === "running") return idx < st.shotIdx ? "done" : idx === st.shotIdx ? "proc" : "wait";
+  if (st.statusCls === "finished") return "done";
+  if (st.statusCls === "failed") return idx < st.shotIdx ? "done" : idx === st.shotIdx ? "fail" : "wait";
+  return "wait";
 }
 
-/* Screenshot Iklan: preview thumbnail hasil run. Satu kartu per toko.
-   SALIN SEKALI, FOTO TERPISAH (2026-09-17): saat run selesai Python
-   menyalin SEMUA file PNG ke clipboard sekaligus (copy_files → CF_HDROP,
-   file drop) — paste di WA/Telegram keluar N foto berbeda per toko,
-   BUKAN 1 gambar gabungan. Tombol salin per kartu & "Salin Semua"
-   dihapus (tidak perlu klik lagi). Preview pakai data URI (bukan
-   file://): file:// broken image icon di pywebview/WebView2 karena
-   permission & encoding path Windows. */
+function captionFor(fileName) {
+  const storeName = fileName.replace(/_\d{4}_sd_\d{4}\.png$/, "").replace(/\.png$/i, "").replace(/_/g, " ");
+  const now = new Date();
+  return `Shopee Ads ${storeName} ${pad2(now.getDate())}/${pad2(now.getMonth() + 1)}/${now.getFullYear()}`;
+}
+
 function renderScreenshotPreview(st) {
   const box = $("#shot-previews");
+  const isShot = !!(currentTool && currentTool.script === "screenshot_iklan.py");
+  box.classList.toggle("hidden", !isShot);
+  if (!isShot) return;
   const items = (st && st.screenshotFiles) || [];
-  const show = !!(items.length && currentTool && (currentTool.script === "screenshot_iklan.py"));
-  box.classList.toggle("hidden", !show);
-  if (!show) return;
-  box.innerHTML = `<div class="shot-paste-hint"><span>📌 Hotkey global aktif:</span><span class="hotkey-chip">Ctrl+Alt+V</span><span>tempel 3 gambar + caption otomatis</span></div>`;
-  for (const it of items) {
-    const name = it.path ? it.path.split(/[\\/]/).pop() : "screenshot";
+  const used = new Set();
+  const cards = STORES.filter((s) => s.enabled).map((s, i) => {
+    const k = fileKey(s.name);
+    const it = items.find((x) => x.path && x.path.split(/[\\/]/).pop().toLowerCase().includes(k));
+    if (it) used.add(it);
+    return { label: shortStore(s.name), idx: i, item: it };
+  });
+  items.filter((x) => !used.has(x)).forEach((it, j) => cards.push({ label: (it.path || "Screenshot").split(/[\\/]/).pop(), idx: cards.length + j, item: it }));
+
+  box.innerHTML = `<div class="shot-paste-hint"><span class="hotkey-chip"></span><span>tempel 3 gambar + caption otomatis setelah proses selesai</span></div><div class="store-grid"></div>`;
+  box.querySelector(".hotkey-chip").textContent = hotkeyText();
+  const grid = box.querySelector(".store-grid");
+  for (const c of cards) {
+    const status = storeStatus(st, c.idx, !!c.item);
     const card = document.createElement("div");
-    card.className = "shot-card";
-    card.innerHTML = `<span class="shot-card-title"></span>
-      <img class="shot-thumb" alt="Preview screenshot iklan">
-      <span class="shot-path"></span>
-      <button class="btn sm copy-caption" style="margin-top:6px; background:#007acc; color:#fff; border:none; padding:4px 8px; border-radius:3px; cursor:pointer;">Copy Caption</button>`;
-    card.querySelector(".shot-card-title").textContent = name;
-    card.querySelector(".shot-thumb").src = it.uri || "";
-    card.querySelector(".shot-path").textContent = it.path || "";
-    const capBtn = card.querySelector(".copy-caption");
-    capBtn.addEventListener("click", async () => {
-      const storeName = name.replace(/_\d{4}_sd_\d{4}\.png$/, "").replace(/_/g, " ");
-      const now = new Date();
-      const dd = String(now.getDate()).padStart(2, "0");
-      const mm = String(now.getMonth() + 1).padStart(2, "0");
-      const yyyy = now.getFullYear();
-      const caption = `Shopee Ads ${storeName} ${dd}/${mm}/${yyyy}`;
-      const api = bridgeApi();
-      if (api && typeof api.copy_text === "function") {
-        const res = await api.copy_text(caption);
-        if (res && res.ok) {
-          capBtn.textContent = "Copied ✓";
-          setTimeout(() => capBtn.textContent = "Copy Caption", 1500);
+    card.className = "store-card";
+    card.dataset.idx = c.idx;
+    card.dataset.status = status;
+    card.innerHTML = `<div class="store-head"><span class="store-name"></span><span class="badge" data-status="${status}">${STORE_STATUS_TEXT[status]}</span></div>
+      <div class="thumb-box">${c.item ? '<img class="shot-thumb" alt="">' : svg("image", 28)}</div>`;
+    card.querySelector(".store-name").textContent = c.label;
+    card.querySelector(".store-name").title = c.label;
+    if (c.item) {
+      const name = c.item.path ? c.item.path.split(/[\\/]/).pop() : "screenshot";
+      const img = card.querySelector(".shot-thumb");
+      img.src = c.item.uri || "";
+      img.alt = "Hasil screenshot iklan " + c.label;
+      const p = document.createElement("div");
+      p.className = "shot-path"; p.textContent = name; p.title = c.item.path || "";
+      const capBtn = document.createElement("button");
+      capBtn.className = "btn secondary small copy-caption";
+      capBtn.setAttribute("aria-label", "Salin caption " + c.label);
+      capBtn.innerHTML = svg("copy", 14) + "<span>Salin Caption</span>";
+      capBtn.addEventListener("click", async () => {
+        const api = bridgeApi();
+        if (api && typeof api.copy_text === "function") {
+          const res = await api.copy_text(captionFor(name));
+          flashCopy(capBtn, !!(res && res.ok), "Caption tersalin");
         }
-      }
-    });
-    box.appendChild(card);
+      });
+      card.append(p, capBtn);
+    }
+    grid.appendChild(card);
   }
+}
+
+function updateStoreBadges(st) {
+  document.querySelectorAll("#shot-previews .store-card").forEach((card) => {
+    const hasFile = !!card.querySelector(".shot-thumb");
+    const s = storeStatus(st, Number(card.dataset.idx), hasFile);
+    card.dataset.status = s;
+    const badge = card.querySelector(".badge");
+    badge.dataset.status = s;
+    badge.textContent = STORE_STATUS_TEXT[s];
+  });
 }
 
 /* dipanggil Python saat run selesai — array {path, uri} per toko */
@@ -465,41 +691,29 @@ function showScreenshotPreviews(key, items) {
   if (isActiveRun(key)) renderScreenshotPreview(st);
 }
 
-/* Digantikan tombol Salin per kartu — lihat renderScreenshotPreview. */
 function onShotCopyClick() {}
 
-/* ── fitur salin per kolom (tempel Excel) ────────────────────────────
-   Data item di-push Python SEKALI saat run selesai (pushItems) — tidak
-   reparse dari log mentah per klik. Ketiga tombol (Kode / Harga Shopee /
-   No Faktur) memakai daftar item yang SAMA (filter aktif + urutan asli
-   dari tabel tool), jadi jumlah baris & urutannya sejajar persis antar
-   kolom — aman ditempel ke 3 kolom Excel bersebelahan. */
+/* ── salin per kolom → Excel ──────────────────────────────────────── */
 function renderCopyBar(st) {
   const bar = $("#copy-bar");
-  const hasItems = st && Array.isArray(st.items) && st.items.length > 0;
+  const hasItems = !!(st && Array.isArray(st.items) && st.items.length > 0);
   bar.classList.toggle("hidden", !hasItems);
   if (!hasItems) return;
   const sel = $("#copy-filter");
   if (sel.value !== st.copyFilter) sel.value = st.copyFilter;
   const rows = st.items.filter((it) => it.kategori === st.copyFilter);
-  $("#copy-count").textContent = rows.length
-    ? `${rows.length} item — baris sejajar di ketiga kolom`
-    : "0 item";
+  $("#copy-count").textContent = rows.length ? `${rows.length} item, baris sejajar di ketiga kolom` : "0 item";
 }
 
 function copyColumn(field, btn) {
   if (!activeRun) return;
   const st = toolStateOf(activeRun.key);
   const rows = st.items.filter((it) => it.kategori === st.copyFilter);
-  const text = rows
-    .map((r) => {
-      const v = r[field] != null ? r[field] : "";
-      if (field === "harga_shopee" && /^\d+$/.test(v)) {
-        return Number(v).toLocaleString("en-US");
-      }
-      return v;
-    })
-    .join("\n");
+  const text = rows.map((r) => {
+    const v = r[field] != null ? r[field] : "";
+    if (field === "harga_shopee" && /^\d+$/.test(v)) return Number(v).toLocaleString("en-US");
+    return v;
+  }).join("\n");
   copyTextToClipboard(btn, text);
 }
 
@@ -510,36 +724,20 @@ function onCopyFilterChange() {
   renderCopyBar(st);
 }
 
-/* dipanggil Python saat run selesai — struktur per-item utk run ini */
 function pushItems(key, items) {
   const st = toolStateOf(key);
   st.items = Array.isArray(items) ? items : [];
   if (isActiveRun(key)) renderCopyBar(st);
 }
 
-/* ── warna marker log — port style_log_line() dari ui/theme.py ──────
-   Marker/prefix baris log di-wrap span dengan warna token theme yang
-   SAMA dengan Textual (ui/theme.py COLOR_INFO/SUCCESS/ERROR/WARNING/
-   SUBTLE = CSS var --amber/--green/--red/--text-low di style.css).
-   Isi baris TIDAK diubah — teks tetap terbaca di monokrom. Baris tanpa
-   marker dibiarkan apa adanya. Jangan re-invent mapping baru di sini;
-   kalau token theme berubah, ubah ui/theme.py + style.css sekaligus. */
-const LOG_MARKER_CLASS = {
-  "[RUN]": "info",
-  "[OK]": "success",
-  "[FAIL]": "error",
-  "[ERROR]": "error",
-  "[DEBUG]": "debug",
-};
-const LOG_ERR_MARKERS = ["\u274c", "\u26d4", "\u2718"];   // ❌ ⛔ ✘
-const LOG_WARN_MARKERS = ["\u26a0", "\u23f3", "\u{1F4CC}"]; // ⚠ ⏳ 📌
-const LOG_OK_MARKERS = ["\u2705", "\u2714"];               // ✅ ✔
-
-function escHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+/* ── pewarnaan log ────────────────────────────────────────────────── */
+const LOG_MARKER_CLASS = { "[RUN]": "info", "[OK]": "success", "[FAIL]": "error", "[ERROR]": "error", "[DEBUG]": "debug" };
+const LOG_ERR_MARKERS = ["\u274c", "\u26d4", "\u2718"];
+const LOG_WARN_MARKERS = ["\u26a0", "\u23f3", "\u{1F4CC}"];
+const LOG_OK_MARKERS = ["\u2705", "\u2714"];
 
 function styleLogLine(line) {
+  line = String(line);
   const stripped = line.replace(/^\s+/, "");
   if (!stripped) return escHtml(line);
   const lead = line.slice(0, line.length - stripped.length);
@@ -555,101 +753,102 @@ function styleLogLine(line) {
   return escHtml(lead) + `<span class="log-marker log-marker-${cls}">${escHtml(first)}</span>` + escHtml(rest);
 }
 
+/* level baris log: info | warn | error (untuk filter & warna baris) */
+function classifyLog(line) {
+  const s = String(line);
+  if (/\[FAIL\]|\[ERROR\]|\bERROR\b|\bCRITICAL\b|Traceback|\u274c|\u26d4|\u2718/.test(s)) return "error";
+  if (/\bWARN(ING)?\b|\u26a0|\u23f3/.test(s)) return "warn";
+  return "info";
+}
+
 /* ── dipanggil Python (reader thread) via evaluate_js ─────────────── */
 function appendLogLine(key, line) {
   const st = toolStateOf(key);
-  st.logHtml.push(styleLogLine(line) + "\n");
+  const lv = classifyLog(line);
+  const html = styleLogLine(line);
+  st.logHtml.push(`<span class="lv-${lv}">${html}</span>\n`);
+  /* tahap Screenshot Iklan: nama toko yang muncul di log = toko yang sedang diproses */
+  if (baseScript(key) === "screenshot_iklan.py") {
+    const low = String(line).toLowerCase();
+    STORES.filter((s) => s.enabled).forEach((s, i) => {
+      const n = (s.name.match(/Toko\s*(\d+)/i) || [])[1];
+      if (i > st.shotIdx && (low.includes(shortStore(s.name).toLowerCase()) || (n && new RegExp("toko\\s*" + n + "\\b").test(low)))) st.shotIdx = i;
+    });
+  }
   if (isActiveRun(key)) {
     const el = $("#tool-log");
-    /* .log-anim = fade-in HANYA untuk insert live; riwayat (logHtml)
-       disimpan TANPA kelas ini supaya replay/layar Logs tidak
-       menganimasi ulang seluruh isi saat pindah mode. */
-    el.insertAdjacentHTML("beforeend", `<span class="log-anim">${styleLogLine(line)}</span>\n`);
-    el.scrollTop = el.scrollHeight;
+    el.insertAdjacentHTML("beforeend", `<span class="log-anim lv-${lv}">${html}</span>\n`);
+    $("#log-count").textContent = `${st.logHtml.length} baris`;
+    scrollLog(false);
+    if (baseScript(key) === "screenshot_iklan.py") updateStoreBadges(st);
   }
 }
 
 function updateSummaryCards(key, s) {
   const st = toolStateOf(key);
-  if (s.total != null) st.summary.total = s.total;
-  if (s.ok != null) st.summary.ok = s.ok;
-  if (s.beda != null) st.summary.beda = s.beda;
-  if (s.notfound != null) st.summary.notfound = s.notfound;
-  if (s.durasi != null) st.summary.durasi = s.durasi;
+  for (const [f] of SUM_FIELDS) if (s[f] != null) st.summary[f] = s[f];
   if (!isActiveRun(key)) return;
-  if (s.total != null) $("#sum-total").textContent = s.total;
-  if (s.ok != null) $("#sum-ok").textContent = s.ok;
-  if (s.beda != null) $("#sum-beda").textContent = s.beda;
-  if (s.notfound != null) $("#sum-notfound").textContent = s.notfound;
-  if (s.durasi != null) $("#sum-durasi").textContent = s.durasi;
+  for (const [f, sel] of SUM_FIELDS) if (s[f] != null) setMetric(f, sel, s[f]);
+  for (const [f, sel] of SUM_FIELDS) if (st.summary[f] == null && st.running) paintMetric(f, $(sel), null, true);
 }
 
 function onToolStarted(key) {
   const st = toolStateOf(key);
-  st.startedAt = Date.now();
+  if (!st.startedAt) st.startedAt = Date.now();
   st.stopRequested = false;
   st.running = true;
   st.statusCls = "running";
-  st.statusText = "Status: Running...";
+  st.statusText = "Berjalan";
+  st.error = null;
   st.progress = 20;
-  if (isActiveRun(key)) {
-    setStatus("running", "Status: Running...");
-    $("#tool-progress").style.width = "20%";
-    $("#start-btn").disabled = true;
-    $("#stop-btn").disabled = false;
-  }
+  if (isActiveRun(key)) renderRun(key);
+  refreshSidebarStates();
 }
 
-/* ── setelah tool selesai: TETAP di tempat ───────────────────────────
-   Sebelumnya (sesi sebelumnya): auto-nav ke Dashboard 5 dtk setelah
-   sukses. KEPUTUSAN BARU — keputusan lama DI-SUPERSEDE: TIDAK ada
-   auto-nav sama sekali. Kasus paling umum (user Start lalu menunggu di
-   ToolScreen itu) → user tetap di ToolScreen, hasil langsung terlihat.
-   Kalau user pindah ke layar lain saat tool jalan, dia TIDAK dipaksa
-   pindah balik (prinsip yang sama dengan cancelAutoNav dulu: jangan
-   ganggu navigasi manual user) — cukup window bring-to-front (Kelompok
-   A2, di Python, untuk Finished DAN Failed) + badge hasil baru di
-   sidebar (markToolHasResult) supaya user tahu run sudah selesai. */
-
-/* badge "hasil baru" di item sidebar tool ini — muncul saat run tool/
-   mode mana pun selesai (sukses ATAU gagal), dihapus saat user membuka
-   tool itu. Key bisa berformat "script::Mode" → ambil nama script saja. */
-function markToolHasResult(key) {
-  const script = String(key).split("::")[0];
-  const btn = document.querySelector(`.sb-item[data-nav="tool"][data-script="${script}"]`);
-  if (btn) btn.classList.add("sb-new");
+/* tidak ada auto-nav setelah selesai: user tetap di tempat; badge di
+   sidebar + toast memberi tahu hasilnya. */
+function markToolHasResult(key, ok) {
+  const sc = baseScript(key);
+  unseen[sc] = ok ? "done" : "fail";
+  lastRun[sc] = { ok: !!ok, at: new Date() };
 }
 
 function onToolFinished(key, success, error, banner) {
   const st = toolStateOf(key);
+  const wasStopped = st.stopRequested || st.statusCls === "stopped";
   if (success) {
-    if (st.summary.durasi == null && st.startedAt) {
-      st.summary.durasi = ((Date.now() - st.startedAt) / 1000).toFixed(1);
-    }
+    if (st.summary.durasi == null && st.startedAt) st.summary.durasi = ((Date.now() - st.startedAt) / 1000).toFixed(1);
     st.statusCls = "finished";
-    st.statusText = "Status: Finished";
+    st.statusText = "Selesai";
     st.progress = 100;
     st.banner = banner;
+    st.error = null;
+  } else if (wasStopped) {
+    st.statusCls = "stopped";
+    st.statusText = "Dihentikan";
+    st.error = null;
   } else {
-    st.statusCls = "failed";
-    st.statusText = st.stopRequested
-      ? "Status: Stopped by user"
-      : "Status: Failed" + (error ? " \u2014 " + error : "");
+    failRun(st, error);
   }
   st.running = false;
   st.startedAt = null;
   st.stopRequested = false;
-  markToolHasResult(key);
+  markToolHasResult(key, success);
   if (isActiveRun(key)) renderRun(key);
+  refreshSidebarStates();
+  const name = toolNameOf(key);
+  if (success) showToast(`${name} selesai`, "success");
+  else if (wasStopped) showToast(`${name} dihentikan`, "info");
+  else showToast(`${name} gagal`, "error", 3600);
 }
 
-/* reset state sebuah run (mulai dari kosong) */
 function resetRunState(st) {
   st.logHtml = [];
   st.summary = { total: null, ok: null, beda: null, notfound: null, durasi: null };
   st.banner = null;
+  st.error = null;
   st.statusCls = "running";
-  st.statusText = "Status: Running...";
+  st.statusText = "Berjalan";
   st.progress = 20;
   st.running = true;
   st.startedAt = Date.now();
@@ -657,53 +856,48 @@ function resetRunState(st) {
   st.items = [];
   st.copyFilter = "ok";
   st.screenshotFiles = [];
+  st.shotIdx = 0;
+}
+
+/* ── Start / Stop ─────────────────────────────────────────────────── */
+function startFailed(st, key, msg) {
+  failRun(st, msg);
+  renderRun(key);
+  refreshSidebarStates();
+}
+
+/* UI langsung berubah ke "Berjalan" saat Start diklik (tanpa menunggu callback Python) */
+function launch(script, key, st, before) {
+  const api = bridgeApi();
+  if (!api || typeof api.start_tool !== "function") return startFailed(st, key, "Jembatan ke aplikasi belum siap. Tutup lalu buka ulang BOPEL.");
+  const go = () => api.start_tool(script, key);
+  Promise.resolve(before ? before(api) : null).then(go).then((res) => {
+    if (!res || !res.ok) startFailed(st, key, "Tidak bisa memulai: " + ((res && res.message) || "alasan tidak diketahui"));
+  }).catch((err) => startFailed(st, key, "Kesalahan jembatan: " + err));
 }
 
 function onStart() {
   if (!currentTool) return;
+  if (Array.isArray(currentTool.modes) && currentTool.modes.length) {
+    const m = currentTool.modes.find((x) => x.name === lastModeRun[currentTool.script]);
+    if (m) onModeClick(currentTool, m);
+    return;
+  }
   const script = currentTool.script;
   const key = script;
   activeRun = { key, script };
   const st = toolStateOf(key);
   resetRunState(st);
   renderRun(key);
-  const api = bridgeApi();
-  if (!api || typeof api.start_tool !== "function") {
-    st.statusCls = "failed";
-    st.statusText = "Status: Bridge belum siap";
-    st.running = false;
-    renderRun(key);
-    return;
-  }
-  /* Tool uses_stores (Screenshot Iklan, dsb.): kirim rentang tanggal ke
-     bridge dulu (set_active_store → .active_store.json), supaya tool baca
-     tanggal yang benar saat Start. Screenshot Iklan kirim TANPA nama toko
-     (toko di-loop 1→2→3 oleh script — UI tidak milih toko). Checklist
-     Otomatis tetap kirim nama toko terpilih. */
+  refreshSidebarStates();
   const needsStore = currentTool.uses_stores && STORES.length;
   const isShot = currentTool.script === "screenshot_iklan.py";
-  const doStart = () => api.start_tool(script, key);
-  const run = needsStore
-    ? Promise.resolve(pushActiveStore(api, isShot ? null : (storeChoice || (STORES.find((s) => s.enabled) || {}).name))).then(doStart)
-    : Promise.resolve(doStart());
-  run.then((res) => {
-    if (!res || !res.ok) {
-      st.statusCls = "failed";
-      st.statusText = "Status: Gagal start (" + ((res && res.message) || "?") + ")";
-      st.progress = 0;
-      st.running = false;
-      renderRun(key);
-    }
-  }).catch((err) => {
-    st.statusCls = "failed";
-    st.statusText = "Status: Error bridge: " + err;
-    st.progress = 0;
-    st.running = false;
-    renderRun(key);
-  });
+  launch(script, key, st, needsStore
+    ? (api) => pushActiveStore(api, isShot ? null : (storeChoice || (STORES.find((s) => s.enabled) || {}).name))
+    : null);
 }
 
-/* Kelompok D — klik tombol MODE: mulai run mode itu (state per mode) */
+/* menjalankan sebuah mode (dipanggil Start bila tool punya modes) */
 function onModeClick(tool, mode) {
   const script = mode.script || tool.script;
   const key = runKey(tool.script, mode.name);
@@ -711,31 +905,10 @@ function onModeClick(tool, mode) {
   activeRun = { key, script };
   const st = toolStateOf(key);
   resetRunState(st);
-  renderToolHeader(tool); // highlight mode aktif
+  renderModeSeg(tool);
   renderRun(key);
-  const api = bridgeApi();
-  if (!api || typeof api.start_tool !== "function") {
-    st.statusCls = "failed";
-    st.statusText = "Status: Bridge belum siap";
-    st.running = false;
-    renderRun(key);
-    return;
-  }
-  api.start_tool(script, key).then((res) => {
-    if (!res || !res.ok) {
-      st.statusCls = "failed";
-      st.statusText = "Status: Gagal start (" + ((res && res.message) || "?") + ")";
-      st.progress = 0;
-      st.running = false;
-      renderRun(key);
-    }
-  }).catch((err) => {
-    st.statusCls = "failed";
-    st.statusText = "Status: Error bridge: " + err;
-    st.progress = 0;
-    st.running = false;
-    renderRun(key);
-  });
+  refreshSidebarStates();
+  launch(script, key, st, null);
 }
 
 function onStop() {
@@ -744,83 +917,35 @@ function onStop() {
   const st = toolStateOf(run.key);
   st.stopRequested = true;
   const api = bridgeApi();
-  if (api && typeof api.stop_tool === "function") {
-    api.stop_tool(run.script);
-  }
-  st.statusCls = "failed";
-  st.statusText = "Status: Stopped by user";
+  if (api && typeof api.stop_tool === "function") api.stop_tool(run.script);
+  st.statusCls = "stopped";
+  st.statusText = "Dihentikan";
   st.running = false;
+  st.startedAt = null;
   renderRun(run.key);
+  refreshSidebarStates();
 }
 
-/* ── tombol "Fetch dari Shopee" (Auto-Fetch, 2026-08-19) ─────────────
-   Jalanin shopee_fetch.py sebagai run biasa (streaming + status + Stop
-   via launcher) dengan state sendiri. Hasilnya: blok Dana Dilepaskan
-   tersalin ke clipboard — user lalu klik Start (check.py) seperti alur
-   manual. TIDAK auto-trigger Start. */
 function onFetchClick() {
   const script = "shopee_fetch.py";
   const key = script;
   const st = toolStateOf(key);
-
-  /* Jika fetch sudah berjalan, jangan start ulang — cukup tampilkan view
-     run yang sedang berjalan (log + status). Mencegah duplikat klik yang
-     bikin "Gagal start (sudah running)" dan reset state yg sedang jalan. */
-  if (st.running) {
-    activeRun = { key, script };
-    renderRun(key);
-    return;
-  }
-
-  /* FIX (2026-09-25): Set activeRun + resetRunState + renderRun SEBELUM
-     start_tool, sama seperti onStart() dan onModeClick(). Sebelumnya ini
-     ada di .then() SETELAH start_tool resolve — berarti saat reader thread
-     kirim onToolStarted, isActiveRun() masih false, UI gak update (status
-     tetap "Idle", Start enabled, Stop disabled). User kira bot gak jalan /
-     "binggung", klik ulang → "Gagal start (sudah running)" / klik Start →
-     interferensi clipboard → harus stop+start berulang. */
+  if (st.running) { activeRun = { key, script }; renderRun(key); return; }
   activeRun = { key, script };
   resetRunState(st);
   renderRun(key);
-
-  const api = bridgeApi();
-  if (!api || typeof api.start_tool !== "function") {
-    st.statusCls = "failed";
-    st.statusText = "Status: Bridge belum siap";
-    st.running = false;
-    renderRun(key);
-    return;
-  }
-  /* Simpan dulu rentang tanggal terpilih (ke .active_store.json via
-     bridge) SEBELUM fetch jalan — shopee_fetch.py baca state ini untuk
-     dateRange di URL income. Kalau gagal dikirim pun fetch tetap jalan
-     (state toko lama dipakai, perilaku aman). */
-  Promise.resolve(pushActiveStore(api, storeChoice || (STORES.find((s) => s.enabled) || {}).name))
-    .then(() => api.start_tool(script, key))
-    .then((res) => {
-      if (!res || !res.ok) {
-        st.statusCls = "failed";
-        st.statusText = "Status: Gagal start (" + ((res && res.message) || "?") + ")";
-        st.progress = 0;
-        st.running = false;
-        renderRun(key);
-      }
-    })
-    .catch((err) => {
-      st.statusCls = "failed";
-      st.statusText = "Status: Error bridge: " + err;
-      st.progress = 0;
-      st.running = false;
-      renderRun(key);
-    });
+  refreshSidebarStates();
+  launch(script, key, st, (api) => pushActiveStore(api, storeChoice || (STORES.find((s) => s.enabled) || {}).name));
 }
 
-/* ── Fase 4: dashboard polling / logs / settings via bridge ────────── */
-let logsRendered = 0;
-
-function isSectionActive(name) {
-  const s = document.querySelector(`.screen[data-section="${name}"]`);
-  return s && s.classList.contains("active");
+/* ── dashboard ────────────────────────────────────────────────────── */
+function meterTone(p) { return p >= 90 ? "crit" : p >= 75 ? "warn" : ""; }
+function setMeter(barSel, valSel, text) {
+  const p = Math.max(0, Math.min(100, parseFloat(text) || 0));
+  const bar = $(barSel);
+  bar.style.transform = `scaleX(${p / 100})`;
+  bar.className = meterTone(p);
+  $(valSel).textContent = text;
 }
 
 async function refreshSystemInfo() {
@@ -829,71 +954,133 @@ async function refreshSystemInfo() {
   try {
     const info = await api.get_system_info();
     if (!info) return;
-    if (info.python) $("#dash-python").textContent = `Python ${info.python}  |  ${info.os || ""}`;
-    if (info.terminal) $("#dash-term").textContent = `Terminal: ${info.terminal}`;
-    if (info.date) $("#dash-date").textContent = `Date: ${info.date}`;
-    if (info.cpu) $("#dash-cpu").textContent = info.cpu;
-    if (info.ram) $("#dash-ram").textContent = info.ram;
+    if (info.python) $("#dash-python").textContent = `Python ${info.python}${info.os ? "  |  " + info.os : ""}`;
+    if (info.date) $("#dash-date").textContent = info.date;
+    if (info.cpu) setMeter("#dash-cpu-bar", "#dash-cpu", info.cpu);
+    if (info.ram) setMeter("#dash-ram-bar", "#dash-ram", info.ram);
   } catch (err) { /* polling gagal sekali — abaikan */ }
 }
 
-async function refreshLogs(force) {
+function renderMacro() {
+  const pm = CONFIG && CONFIG.paste_macro;
+  $("#macro-hotkey").textContent = hotkeyText();
+  const badge = $("#macro-state");
+  if (pm && typeof pm.enabled === "boolean") {
+    badge.dataset.status = pm.enabled ? "done" : "fail";
+    badge.textContent = pm.enabled ? "Aktif" : "Nonaktif";
+  } else {
+    badge.dataset.status = "wait";
+    badge.textContent = "Status tidak terbaca";
+  }
+}
+
+function renderDashboardTools() {
+  const box = $("#dash-tools");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const t of TOOLS) {
+    const isRun = Object.entries(toolStates).some(([k, st]) => st.running && baseScript(k) === t.script);
+    const lr = lastRun[t.script];
+    const dot = isRun ? "" : lr ? (lr.ok ? "ok" : "fail") : "";
+    const text = isRun ? "Sedang berjalan" : lr ? `${lr.ok ? "Selesai" : "Gagal"} pukul ${fmtClock(lr.at)}` : "Belum dijalankan di sesi ini";
+    const card = document.createElement("div");
+    card.className = "tool-card";
+    card.innerHTML = `<div class="tool-card-top"><span class="tool-card-ic">${svg(TOOL_ICON[t.script] || "dot", 20)}</span><h4></h4></div><p></p>
+      <div class="tool-card-foot"><span class="tool-card-status">${isRun ? '<i class="pulse-dot"></i>' : `<i class="dot ${dot}"></i>`}<span></span></span><button class="btn secondary small">Buka</button></div>`;
+    card.querySelector("h4").textContent = t.name;
+    card.querySelector("p").textContent = t.description || "";
+    card.querySelector(".tool-card-status span:last-child").textContent = text;
+    const open = card.querySelector("button");
+    open.setAttribute("aria-label", "Buka " + t.name);
+    open.addEventListener("click", () => {
+      const item = document.querySelector(`.sb-item[data-nav="tool"][data-script="${t.script}"]`);
+      if (item) item.click();
+    });
+    box.appendChild(card);
+  }
+}
+
+function renderDashboard() { renderMacro(); renderDashboardTools(); }
+
+/* ── log aplikasi: filter + cari ──────────────────────────────────── */
+let logsRendered = 0;
+let allLogs = [];
+let logFilter = "all";
+let logQuery = "";
+
+function renderLogsPanel() {
   const panel = $("#log-panel");
+  const q = logQuery.trim().toLowerCase();
+  const rows = allLogs.filter((l) => (logFilter === "all" || classifyLog(l) === logFilter) && (!q || String(l).toLowerCase().includes(q)));
+  const atBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 40;
+  panel.innerHTML = rows.map((l) => `<span class="lv-${classifyLog(l)}">${styleLogLine(l)}</span>`).join("\n");
+  $("#logs-count").textContent = allLogs.length ? `${rows.length} dari ${allLogs.length} baris` : "";
+  $("#logs-empty-text").textContent = allLogs.length ? "Tidak ada baris yang cocok dengan filter atau pencarian." : "Belum ada log. Log muncul setelah tool dijalankan.";
+  if (atBottom) panel.scrollTop = panel.scrollHeight;
+}
+
+async function refreshLogs(force) {
   const api = bridgeApi();
   if (!api || typeof api.get_logs !== "function") return;
   try {
     const logs = await api.get_logs();
     if (!Array.isArray(logs)) return;
-    if (force || logs.length < logsRendered) {
-      panel.innerHTML = logs.map(styleLogLine).join("\n");
-      logsRendered = logs.length;
-      return;
-    }
-    if (logs.length > logsRendered) {
-      panel.insertAdjacentHTML(
-        "beforeend",
-        (logsRendered > 0 ? "\n" : "") + logs.slice(logsRendered).map(styleLogLine).join("\n")
-      );
-      logsRendered = logs.length;
-      panel.scrollTop = panel.scrollHeight;
-    }
+    if (!force && logs.length === logsRendered) return;
+    allLogs = logs;
+    logsRendered = logs.length;
+    renderLogsPanel();
   } catch (err) { /* abaikan */ }
 }
 
+/* ── pengaturan ───────────────────────────────────────────────────── */
 async function refreshSettings() {
+  const pm = CONFIG && CONFIG.paste_macro;
+  $("#set-macro-hotkey").textContent = hotkeyText();
+  $("#set-macro-state").textContent = pm && typeof pm.enabled === "boolean" ? (pm.enabled ? "Aktif" : "Nonaktif") : "Tidak terbaca";
+  $("#set-macro-alt").textContent = pm && Array.isArray(pm.hotkey_cadangan) && pm.hotkey_cadangan.length ? pm.hotkey_cadangan.join(", ") : "--";
   const api = bridgeApi();
   if (!api || typeof api.get_settings_info !== "function") return;
   try {
     const info = await api.get_settings_info();
     if (!info) return;
     if (info.app) {
-      $("#set-app-name").textContent = `Name: ${info.app.name}`;
-      $("#set-app-version").textContent = `Version: ${info.app.version}`;
+      $("#set-app-name").textContent = info.app.name;
+      $("#set-app-version").textContent = info.app.version;
     }
     if (Array.isArray(info.tools)) {
-      $("#set-tools").textContent = info.tools
-        .map((t) => `  - ${t.name}  (${t.script})`)
-        .join("\n");
+      const ul = $("#set-tools");
+      ul.innerHTML = "";
+      for (const t of info.tools) {
+        const li = document.createElement("li");
+        li.innerHTML = "<span></span><span class='mono-sm'></span>";
+        li.firstChild.textContent = t.name;
+        li.lastChild.textContent = t.script;
+        ul.appendChild(li);
+      }
     }
     if (info.python) {
-      $("#set-py-version").textContent = `Version: ${info.python.version}`;
-      $("#set-py-exec").textContent = `Executable: ${info.python.executable}`;
+      $("#set-py-version").textContent = info.python.version;
+      $("#set-py-exec").textContent = info.python.executable;
     }
   } catch (err) { /* abaikan */ }
 }
 
-/* ── copy log ke clipboard (Kelompok C) ─────────────────────────────
-   Context menu kanan di-disable pywebview di mode produksi, jadi
-   right-click → Copy gak bisa. Rute utama: bridge copy_text() (pyperclip
-   — sudah dipakai tool scan/check). Fallback browser: textarea + execCommand. */
+/* ── salin ke clipboard + umpan balik ─────────────────────────────── */
+function flashCopy(btn, ok, okMsg) {
+  if (btn) {
+    btn.classList.remove("copied", "copy-fail");
+    void btn.offsetWidth;
+    btn.classList.add(ok ? "copied" : "copy-fail");
+    setTimeout(() => btn.classList.remove("copied", "copy-fail"), 1500);
+  }
+  showToast(ok ? (okMsg || "Tersalin") : "Gagal menyalin", ok ? "success" : "error", 1500);
+}
+
 async function copyTextToClipboard(btn, text) {
   let ok = false;
   const api = bridgeApi();
   if (api && typeof api.copy_text === "function") {
-    try {
-      const res = await api.copy_text(text);
-      ok = !!(res && res.ok);
-    } catch (err) { ok = false; }
+    try { const res = await api.copy_text(text); ok = !!(res && res.ok); } catch (err) { ok = false; }
   }
   if (!ok) {
     const ta = document.createElement("textarea");
@@ -905,35 +1092,27 @@ async function copyTextToClipboard(btn, text) {
     try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
     document.body.removeChild(ta);
   }
-  /* Feedback TANPA mengubah teks tombol: swap label ("Tersalin ✓")
-     menyusutkan lebar tombol -> flex-wrap copy-bar REFLOW (tombol
-     Faktur bisa tiba-tiba naik ke baris 1) -> klik berikutnya yang
-     pakai koordinat lama meleset. Flash warna = nol pergeseran layout. */
-  btn.classList.remove("copied", "copy-fail");
-  void btn.offsetWidth; /* restart transisi/animasi */
-  btn.classList.add(ok ? "copied" : "copy-fail");
-  setTimeout(() => btn.classList.remove("copied", "copy-fail"), 1500);
+  flashCopy(btn, ok);
 }
 
-/* ── clock titlebar (murni JS) ────────────────────────────────────── */
+/* ── jam & timer ──────────────────────────────────────────────────── */
 function tickClock() {
-  const now = new Date();
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mm = String(now.getMinutes()).padStart(2, "0");
-  const ss = String(now.getSeconds()).padStart(2, "0");
-  $("#clock").textContent = `${hh}:${mm}:${ss}`;
+  const n = new Date();
+  $("#clock").textContent = `${pad2(n.getHours())}:${pad2(n.getMinutes())}:${pad2(n.getSeconds())}`;
+}
+
+function tickRunTimer() {
+  if (!activeRun || !isSectionActive("tool")) return;
+  const st = toolStates[activeRun.key];
+  if (st && st.running) setStatus("running", statusLabel(st));
 }
 
 /* ── init ─────────────────────────────────────────────────────────── */
-/* Inisialisasi bridge js_api. pywebview menyuntik window.pywebview +
-   mem-fire event 'pywebviewready' TANPA jaminan urutan vs DOMContentLoaded
-   (di backend edgechromium, API siap SETELAH DOMContentLoaded — terverifikasi
-   Fase 1). Jadi: coba langsung → listener event → fallback poll. */
 let bridgeInited = false;
 
 function initBridge() {
   if (bridgeInited) return true;
-  const api = window.pywebview && window.pywebview.api;
+  const api = bridgeApi();
   if (!api || typeof api.get_config !== "function") return false;
   bridgeInited = true;
   api.get_config()
@@ -950,30 +1129,52 @@ function whenBridgeReady() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  hydrateIcons();
   $("#app-title").textContent = APP_META.name;
   $("#app-subtitle").textContent = APP_META.subtitle;
-  $("#sb-subtitle").textContent = APP_META.subtitle;
   $("#app-version").textContent = `v${APP_META.version}`;
   renderSidebar(TOOLS);
+  setPaused(false);
+  renderDashboard();
 
   document.querySelector(".sidebar").addEventListener("click", onNavClick);
   $("#start-btn").addEventListener("click", onStart);
   $("#stop-btn").addEventListener("click", onStop);
   $("#fetch-btn").addEventListener("click", onFetchClick);
-  $("#copy-tool-log-btn").addEventListener("click", (e) =>
-    copyTextToClipboard(e.currentTarget, $("#tool-log").textContent));
-  $("#copy-log-btn").addEventListener("click", (e) =>
-    copyTextToClipboard(e.currentTarget, $("#log-panel").textContent));
+  $("#scroll-toggle").addEventListener("click", () => { if (logPaused) scrollLog(true); else setPaused(true); });
+  $("#tool-log").addEventListener("scroll", (e) => {
+    const el = e.currentTarget;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    if (!atBottom && !logPaused) setPaused(true);
+    else if (atBottom && logPaused) setPaused(false);
+  });
+  $("#copy-tool-log-btn").addEventListener("click", (e) => copyTextToClipboard(e.currentTarget, $("#tool-log").textContent));
+  $("#copy-error-btn").addEventListener("click", (e) =>
+    copyTextToClipboard(e.currentTarget, ($("#error-text").textContent + "\n\n" + $("#tool-log").textContent).trim()));
+  $("#copy-log-btn").addEventListener("click", (e) => copyTextToClipboard(e.currentTarget, $("#log-panel").textContent));
   $("#copy-kode-btn").addEventListener("click", (e) => copyColumn("kode", e.currentTarget));
   $("#copy-harga-btn").addEventListener("click", (e) => copyColumn("harga_shopee", e.currentTarget));
   $("#copy-faktur-btn").addEventListener("click", (e) => copyColumn("no_faktur", e.currentTarget));
   $("#copy-filter").addEventListener("change", onCopyFilterChange);
 
-  // Esc = kembali ke dashboard (setara Textual Esc/Q)
+  $("#log-filter").addEventListener("click", (e) => {
+    const b = e.target.closest(".btn.choice");
+    if (!b) return;
+    logFilter = b.dataset.level;
+    document.querySelectorAll("#log-filter .btn.choice").forEach((x) => {
+      const on = x === b;
+      x.classList.toggle("active", on);
+      x.setAttribute("aria-checked", on ? "true" : "false");
+    });
+    renderLogsPanel();
+  });
+  $("#log-search").addEventListener("input", (e) => { logQuery = e.target.value; renderLogsPanel(); });
+
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !isSectionActive("dashboard")) {
       showSection("dashboard");
       setActiveNav(document.querySelector('.sb-item[data-nav="dashboard"]'));
+      renderDashboard();
       refreshSystemInfo();
     }
   });
@@ -981,6 +1182,7 @@ document.addEventListener("DOMContentLoaded", () => {
   tickClock();
   setInterval(() => {
     tickClock();
+    tickRunTimer();
     if (isSectionActive("dashboard")) refreshSystemInfo();
     if (isSectionActive("logs")) refreshLogs(false);
   }, 1000);
@@ -989,10 +1191,6 @@ document.addEventListener("DOMContentLoaded", () => {
   dismissSplash();
 });
 
-/* Splash: lantai 1 dtk sejak navigasi supaya terbaca (band ±1-1.5 dtk
-   termasuk render awal); kalau init lebih lambat dari itu, splash
-   bertahan sampai handler init selesai (wait=0) — tidak pernah jadi
-   penghalang fungsi (pointer-events:none). */
 function dismissSplash() {
   const sp = document.getElementById("splash");
   if (!sp) return;
@@ -1003,12 +1201,12 @@ function dismissSplash() {
   }, wait);
 }
 
-/* Disiapkan untuk Fase 1 — mengisi data dari config.yaml via bridge. */
 function applyConfig(cfg) {
   if (!cfg) return;
+  CONFIG = cfg;
   if (cfg.app) {
     if (cfg.app.name) $("#app-title").textContent = cfg.app.name;
-    if (cfg.app.subtitle) { $("#app-subtitle").textContent = cfg.app.subtitle; $("#sb-subtitle").textContent = cfg.app.subtitle; }
+    if (cfg.app.subtitle) $("#app-subtitle").textContent = cfg.app.subtitle;
     if (cfg.app.version) $("#app-version").textContent = `v${cfg.app.version}`;
   }
   if (Array.isArray(cfg.tools) && cfg.tools.length) {
@@ -1019,7 +1217,6 @@ function applyConfig(cfg) {
     }));
     renderSidebar(TOOLS);
   }
-  if (Array.isArray(cfg.stores) && cfg.stores.length) {
-    STORES = cfg.stores;
-  }
+  if (Array.isArray(cfg.stores) && cfg.stores.length) STORES = cfg.stores;
+  renderDashboard();
 }

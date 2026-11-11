@@ -36,8 +36,10 @@ def parse_page(text: str) -> dict:
         if abs(_idr(nilai) - _idr(ppn) - net_d) > Decimal("0.02"):
             problems.append((no, f"nilai-ppn != net ({nilai} - {ppn} vs {net})")); continue
         rows.append({"no": no, "kode": memo, "invoice": fp.group(), "tgl": dates[0],
-                     "nilai": _idr(nilai), "ppn": _idr(ppn), "net": net_d, "warn": warn})
+                     "nilai": _idr(nilai), "ppn": _idr(ppn), "net": net_d, "warn": warn,
+                     "bayar_raw": bayar.strip(), "terbayar_raw": terbayar.strip()})
     if declared and int(declared.group(1)) != len(rows):
+        problems.append((0, f"header bilang {declared.group(1)} baris, terbaca {len(rows)}"))
         problems.append((0, f"header bilang {declared.group(1)} baris, terbaca {len(rows)}"))
     kodes = [r["kode"] for r in rows]
     if len(set(kodes)) != len(kodes):

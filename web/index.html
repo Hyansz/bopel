@@ -4,159 +4,163 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bopel Automation Toolkit</title>
-  <!-- Font: Space Grotesk (judul) + Inter (body) + JetBrains Mono (log).
-       DI-BUNDLE LOKAL (web/fonts/, @font-face di style.css) — tidak ada
-       ketergantungan Google Fonts CDN (lingkungan warehouse bisa offline/
-       firewall; font lokal juga lebih cepat & deterministik). -->
+  <!-- Font lokal (web/fonts, @font-face di style.css) — tanpa CDN, aman offline. -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- ═══ SPLASH (muncul sekali per buka app; app.js menghapusnya setelah fade) ═══ -->
-  <div id="splash">
+  <div id="splash" aria-hidden="true">
     <div class="splash-mark">BOPEL</div>
-    <div class="splash-sub">AUTOMATION TOOLKIT</div>
+    <div class="splash-sub">Automation Toolkit</div>
   </div>
 
-  <!-- ═══ TITLEBAR ═══ -->
-  <header class="titlebar">
-    <div class="tb-left">
-      <span class="tb-title" id="app-title">Bopel Automation Toolkit</span>
-      <span class="tb-sub" id="app-subtitle">Internal Warehouse Utilities</span>
-      <span class="tb-ver" id="app-version">v1.0.0</span>
+  <!-- Garis progres global: tampil selama ada tool berjalan, dari halaman mana pun -->
+  <div class="global-progress" id="global-progress" aria-hidden="true"><span></span></div>
+
+  <!-- ═══ HEADER (satu-satunya identitas aplikasi) ═══ -->
+  <header class="app-header">
+    <div class="hd-left">
+      <span class="hd-logo" aria-hidden="true">B</span>
+      <span class="hd-title" id="app-title">Bopel Automation Toolkit</span>
+      <span class="hd-ver" id="app-version">v2.0.0</span>
+      <span class="hd-sub" id="app-subtitle">Internal Warehouse Utilities</span>
     </div>
-    <span class="tb-clock" id="clock">--:--:--</span>
+    <div class="hd-right">
+      <span class="hd-running hidden" id="hd-running"><i class="pulse-dot"></i><span id="hd-running-text"></span></span>
+      <span class="hd-clock" id="clock">--:--:--</span>
+    </div>
   </header>
 
-  <!-- ═══ LAYOUT: SIDEBAR + MAIN ═══ -->
   <div class="layout">
-    <aside class="sidebar">
-      <div class="sb-brand">
-        <div class="sb-title">BOPEL AUTOMATION</div>
-        <div class="sb-subtitle" id="sb-subtitle">Internal Warehouse Utilities</div>
-      </div>
-      <div class="sb-section">TOOLS</div>
-      <nav class="sb-nav" id="sidebar-tools"><!-- di-render app.js (Fase 1: dari config.yaml) --></nav>
-      <div class="sb-section">GENERAL</div>
+    <!-- ═══ SIDEBAR: navigasi saja ═══ -->
+    <aside class="sidebar" aria-label="Navigasi utama">
+      <div class="sb-group-label">Tool</div>
+      <nav class="sb-nav" id="sidebar-tools"><!-- dirender app.js dari config.yaml --></nav>
+      <div class="sb-group-label">Umum</div>
       <nav class="sb-nav">
-        <button class="sb-item active" data-nav="dashboard"><span class="sb-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg></span><span>Dashboard</span></button>
-        <button class="sb-item" data-nav="logs"><span class="sb-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></span><span>Logs</span></button>
-        <button class="sb-item" data-nav="settings"><span class="sb-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c0 .69.21 1.35.8 1.8a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span><span>Settings</span></button>
-        <button class="sb-item danger" data-nav="exit"><span class="sb-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span><span>Exit</span></button>
+        <button class="sb-item active" data-nav="dashboard" aria-label="Dashboard" aria-current="page"><span class="sb-icon" data-icon="grid"></span><span class="sb-label">Dashboard</span></button>
+        <button class="sb-item" data-nav="logs" aria-label="Log aplikasi"><span class="sb-icon" data-icon="doc"></span><span class="sb-label">Log</span></button>
+        <button class="sb-item" data-nav="settings" aria-label="Pengaturan"><span class="sb-icon" data-icon="gear"></span><span class="sb-label">Pengaturan</span></button>
+        <button class="sb-item danger" data-nav="exit" aria-label="Keluar dari aplikasi"><span class="sb-icon" data-icon="exit"></span><span class="sb-label">Keluar</span></button>
       </nav>
     </aside>
 
-    <main class="main">
-      <!-- ── DASHBOARD ──
-           Opsi B (2026-08-20): strip toolbar ringkas di atas berisi
-           System Info + CPU/RAM (ikon + label sejajar horizontal) +
-           tanggal rata kanan; di bawahnya 2 card sejajar (Quick Start,
-           Shortcuts). Card dashboard TIDAK ikut pola split kolom —
-           kontennya statis, treatment lebih santai. -->
-      <section class="screen dash active" data-section="dashboard">
-        <div class="toolbar dash-toolbar">
-          <span class="dash-metric">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="14" rx="2"></rect><path d="M7 19.5h10"></path><path d="M9.5 8.5 7.5 11l2 2.5"></path><path d="M14.5 13.5 16.5 11l-2-2.5"></path></svg>
-            <span class="dash-k">Python</span>
-            <span class="dash-v" id="dash-python">--</span>
-          </span>
-          <span class="dash-metric">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"></rect><path d="M9 2.5v5M15 2.5v5M9 16.5v5M15 16.5v5M2.5 9h5M2.5 15h5M16.5 9h5M16.5 15h5"></path></svg>
-            <span class="dash-k">Terminal</span>
-            <span class="dash-v" id="dash-term">--</span>
-          </span>
-          <span class="dash-metric">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect><path d="M9 2.5v3M15 2.5v3M9 18.5v3M15 18.5v3M2.5 9h3M2.5 15h3M18.5 9h3M18.5 15h3"></path></svg>
-            <span class="dash-k">CPU</span>
-            <span class="dash-v" id="dash-cpu">--%</span>
-          </span>
-          <span class="dash-metric">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="8" width="14" height="11" rx="2"></rect><path d="M8 8V6a4 4 0 0 1 8 0v2"></path><path d="M12 12v3"></path></svg>
-            <span class="dash-k">RAM</span>
-            <span class="dash-v" id="dash-ram">--%</span>
-          </span>
-          <span class="tb-spacer"></span>
-          <span class="dash-date">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5V12l3 2"></path></svg>
-            <span id="dash-date">--</span>
-          </span>
-        </div>
-        <div class="dash-grid">
-          <div class="card">
-            <div class="card-title">Quick Start</div>
-            <div class="card-label">1. Click a tool in the sidebar</div>
-            <div class="card-label">2. Press Start to run</div>
-            <div class="card-label">3. Watch the log output</div>
-          </div>
-          <div class="card">
-            <div class="card-title">Shortcuts</div>
-            <div class="card-label">Esc = Back to Dashboard</div>
-            <div class="card-label">Sidebar click = Switch screen</div>
-            <div class="card-label">Start / Stop = Run / Stop tool</div>
-          </div>
-        </div>
-      </section>
+    <main class="main" id="main">
+      <div class="content">
 
-      <!-- ── TOOL ──
-           Opsi B (2026-08-20): toolbar satu baris (background bg-1 +
-           border tipis = unit terpisah dari canvas) berisi kontrol mode
-           kiri + (Otomatis) selector toko + Fetch + Start/Stop rata kanan
-           (.tb-spacer). Di bawahnya grid 2 kolom (.split): kiri sempit
-           ~200px (status pill + progress + summary 2x3), kanan lebar
-           (copy-bar header + log memenuhi sisa). ID semua widget TIDAK
-           berubah (dipakai JS + suite test). -->
-      <section class="screen tool" data-section="tool">
-        <h2 class="tool-title" id="tool-name">Tool</h2>
-        <p class="tool-desc" id="tool-desc">--</p>
-        <div class="toolbar" id="tool-toolbar">
-          <div class="tb-item" id="zone-mode">
-            <div class="mode-btns hidden" id="mode-btns"></div>
-            <div class="mode-btns hidden" id="data-mode-btns"></div>
-          </div>
-          <div class="tb-item hidden" id="zone-source">
-            <!-- store-btns: selector toko Auto-Fetch (Checklist Otomatis).
-                 Screenshot Iklan TIDAK menampilkannya (loop semua toko). -->
-            <div class="store-btns hidden" id="store-btns"></div>
-            <div class="date-range hidden" id="date-range">
-              <span class="date-range-label">Rentang Tanggal</span>
-              <input type="date" class="input date" id="date-start" title="Tanggal awal">
-              <span class="date-range-sep">s/d</span>
-              <input type="date" class="input date" id="date-end" title="Tanggal akhir">
+        <!-- ── DASHBOARD ── -->
+        <section class="screen dash active" data-section="dashboard">
+          <header class="page-head">
+            <div class="page-titles">
+              <h2>Dashboard</h2>
+              <p>Ringkasan tool dan kondisi sistem.</p>
             </div>
-            <button class="btn ghost fetch hidden" id="fetch-btn">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>
-              <span>Fetch dari Shopee</span>
-            </button>
-          </div>
-          <span class="tb-spacer"></span>
-          <div class="tb-item" id="zone-run">
-            <button class="btn start" id="start-btn">Start</button>
-            <button class="btn stop" id="stop-btn" disabled>Stop</button>
-          </div>
-        </div>
-        <div class="success-banner" id="success-banner"></div>
-        <div class="split">
-          <div class="split-left">
-            <div class="status-box">
-              <div class="tool-status idle" id="tool-status">Status: Idle</div>
-              <div class="progress"><div class="progress-fill" id="tool-progress"></div></div>
+            <div class="page-actions"><span class="date-chip"><span data-icon="clock" data-size="16"></span><span id="dash-date">--</span></span></div>
+          </header>
+
+          <div class="dash-top">
+            <div class="card">
+              <h3 class="card-title">Makro tempel</h3>
+              <div class="macro-row">
+                <span class="hotkey-chip" id="macro-hotkey">Ctrl+Alt+V</span>
+                <span class="badge" id="macro-state" data-status="wait">Memeriksa…</span>
+              </div>
+              <p class="card-text">Menempel 3 gambar dan caption otomatis setelah Screenshot Iklan selesai.</p>
             </div>
-            <div class="sum-row">
-              <div class="sum-card"><div class="sum-label">TOTAL ITEM</div><div class="sum-value" id="sum-total">--</div></div>
-              <div class="sum-card"><div class="sum-label">SUKSES</div><div class="sum-value" id="sum-ok">--</div></div>
-              <div class="sum-card"><div class="sum-label">CEK MANUAL</div><div class="sum-value" id="sum-beda">--</div></div>
-              <div class="sum-card"><div class="sum-label">NOT FOUND</div><div class="sum-value" id="sum-notfound">--</div></div>
-              <div class="sum-card"><div class="sum-label">DURASI</div><div class="sum-value" id="sum-durasi">--</div></div>
+            <div class="card">
+              <h3 class="card-title">Kondisi sistem</h3>
+              <div class="meter-row"><span>CPU</span><span class="meter-val" id="dash-cpu">--</span></div>
+              <div class="meter"><i id="dash-cpu-bar"></i></div>
+              <div class="meter-row"><span>RAM</span><span class="meter-val" id="dash-ram">--</span></div>
+              <div class="meter"><i id="dash-ram-bar"></i></div>
+              <p class="card-text mono-sm" id="dash-python">--</p>
+              <span id="dash-term" hidden></span>
             </div>
           </div>
-          <div class="split-right">
-            <!-- Fitur salin data terstruktur per kolom (tempel langsung ke
-                 Excel): muncul setelah ada hasil run (items ter-parse dari
-                 tabel ringkasan tool). Filter dropdown + 3 tombol kolom;
-                 ketiga tombol memakai urutan baris yang SAMA persis sesuai
-                 filter, supaya hasil tempel ke 3 kolom Excel sejajar. -->
+
+          <h3 class="section-title">Tool</h3>
+          <div class="tool-cards" id="dash-tools"></div>
+        </section>
+
+        <!-- ── TOOL ── -->
+        <section class="screen tool" data-section="tool">
+          <header class="page-head">
+            <div class="page-titles">
+              <h2 id="tool-name">Tool</h2>
+              <p id="tool-desc">--</p>
+            </div>
+            <div class="page-actions" id="zone-run">
+              <div class="status-chip tool-status idle" id="tool-status" role="status" aria-live="polite" data-cls="idle">
+                <span class="sc-lead" id="tool-status-lead"><i class="idle-dot"></i></span>
+                <span id="tool-status-text">Siap</span>
+              </div>
+              <span class="start-hint hidden" id="start-hint"></span>
+              <button class="btn stop" id="stop-btn" disabled aria-label="Hentikan proses"><span data-icon="stop" data-size="14"></span><span>Stop</span></button>
+              <button class="btn start" id="start-btn" aria-label="Mulai proses"><span class="btn-ic" id="start-ic"></span><span id="start-label">Start</span></button>
+            </div>
+          </header>
+
+          <section class="controls" id="tool-toolbar" aria-label="Pengaturan proses">
+            <div class="ctl-group hidden" id="zone-mode">
+              <span class="ctl-label">Mode</span>
+              <div class="seg hidden" id="mode-btns" role="radiogroup" aria-label="Mode tool"></div>
+              <div class="seg hidden" id="data-mode-btns" role="radiogroup" aria-label="Sumber data"></div>
+            </div>
+            <div class="ctl-zone hidden" id="zone-source">
+              <div class="ctl-group hidden" id="store-group">
+                <span class="ctl-label">Toko</span>
+                <div class="seg store-btns hidden" id="store-btns" role="radiogroup" aria-label="Pilih toko"></div>
+              </div>
+              <div class="ctl-group date-range hidden" id="date-range">
+                <span class="ctl-label">Rentang tanggal</span>
+                <div class="ctl-row">
+                  <div class="seg" id="date-presets" aria-label="Pilihan cepat tanggal"></div>
+                  <div class="date-fields">
+                    <input type="date" class="input date" id="date-start" aria-label="Tanggal awal">
+                    <span class="date-range-sep">s/d</span>
+                    <input type="date" class="input date" id="date-end" aria-label="Tanggal akhir">
+                  </div>
+                </div>
+              </div>
+              <button class="btn secondary fetch hidden" id="fetch-btn" aria-label="Ambil data dari Shopee"><span data-icon="download" data-size="16"></span><span>Fetch dari Shopee</span></button>
+            </div>
+            <p class="ctl-help hidden" id="ctl-help"></p>
+          </section>
+
+          <div class="alert success success-banner" id="success-banner" role="status">
+            <span class="alert-ic" data-icon="tick" data-size="18"></span>
+            <div class="alert-body"><strong>Selesai</strong><p id="banner-text"></p></div>
+          </div>
+          <div class="alert error hidden" id="error-panel" role="alert">
+            <span class="alert-ic" data-icon="alert" data-size="18"></span>
+            <div class="alert-body"><strong>Proses gagal</strong><p id="error-text"></p></div>
+            <button class="btn ghost small" id="copy-error-btn" aria-label="Salin log beserta pesan error"><span data-icon="copy" data-size="14"></span><span>Salin Log</span></button>
+          </div>
+
+          <div class="sum-row metrics" aria-label="Ringkasan hasil">
+            <div class="sum-card" data-tone="neutral"><div class="sum-label">Total item</div><div class="sum-value" id="sum-total">--</div></div>
+            <div class="sum-card" data-tone="success"><div class="sum-label">Sukses</div><div class="sum-value" id="sum-ok">--</div></div>
+            <div class="sum-card" data-tone="warning"><div class="sum-label">Cek manual</div><div class="sum-value" id="sum-beda">--</div></div>
+            <div class="sum-card" data-tone="danger"><div class="sum-label">Not found</div><div class="sum-value" id="sum-notfound">--</div></div>
+            <div class="sum-card" data-tone="neutral"><div class="sum-label">Durasi (detik)</div><div class="sum-value" id="sum-durasi">--</div></div>
+          </div>
+
+          <!-- Screenshot Iklan: petunjuk hotkey + kartu per toko -->
+          <div class="shot-previews hidden" id="shot-previews"></div>
+
+          <section class="panel output-panel" aria-label="Output proses">
+            <div class="panel-head">
+              <h3>Output</h3>
+              <span class="panel-meta" id="log-count"></span>
+              <div class="panel-tools">
+                <button class="btn ghost small" id="scroll-toggle" aria-label="Jeda gulir otomatis"><span data-icon="pause" data-size="14" id="scroll-ic"></span><span id="scroll-label">Jeda gulir</span></button>
+                <button class="btn ghost small" id="copy-tool-log-btn" aria-label="Salin seluruh log"><span data-icon="copy" data-size="14"></span><span>Salin Log</span></button>
+              </div>
+            </div>
+            <div class="progress" id="tool-progress-wrap" aria-hidden="true"><div class="progress-fill" id="tool-progress"></div></div>
+            <!-- Salin data per kolom → Excel: muncul setelah ada hasil -->
             <div class="copy-bar hidden" id="copy-bar">
-              <span class="copy-bar-title">Salin per kolom → Excel</span>
-              <select id="copy-filter" class="input select">
+              <span class="copy-bar-title">Salin per kolom ke Excel</span>
+              <select id="copy-filter" class="input select" aria-label="Filter data yang disalin">
                 <option value="ok">OK / Cocok</option>
                 <option value="bedacek">Beda / Cek Manual</option>
               </select>
@@ -165,66 +169,91 @@
               <button class="btn ghost small" id="copy-faktur-btn">Salin No Faktur</button>
               <span class="copy-bar-count" id="copy-count"></span>
             </div>
-            <div class="log-bar">
-              <span class="log-bar-title">Output</span>
-              <button class="btn ghost small" id="copy-tool-log-btn">Salin Log</button>
+            <div class="log-wrap">
+              <pre class="log" id="tool-log" tabindex="0" aria-label="Isi log proses"></pre>
+              <div class="log-empty" id="log-empty"><span data-icon="terminal" data-size="28"></span><span id="log-empty-text">Belum ada output.</span></div>
             </div>
-            <!-- Screenshot Iklan (2026-09-03): preview thumbnail per toko
-                 (loop semua toko 1→2→3). Muncul saat tool menandai path PNG
-                 (lihat app.js renderScreenshotPreview). Tersembunyi untuk
-                 tool lain & sebelum ada hasil.
-                 (2026-09-17) Tanpa tombol salin: run selesai → semua file
-                 PNG otomatis tersalin sekaligus ke clipboard (CF_HDROP,
-                 foto tetap terpisah per toko) oleh app.py — tinggal
-                 paste, keluar N foto berbeda. -->
-            <div class="shot-previews hidden" id="shot-previews"></div>
-            <pre class="log" id="tool-log"></pre>
-          </div>
-        </div>
-      </section>
+          </section>
+        </section>
 
-      <!-- ── LOGS ──
-           Opsi B: header (judul+subtitle kiri, tombol Salin Log kanan)
-           lalu satu panel log besar memenuhi sisa tinggi — TIDAK dipecah
-           2 kolom (log butuh lebar penuh untuk dibaca). -->
-      <section class="screen logs" data-section="logs">
-        <div class="log-head">
-          <span class="log-head-title">Application Log</span>
-          <span class="log-head-sub">Semua aktivitas tool &amp; aplikasi</span>
-          <button class="btn ghost small" id="copy-log-btn">Salin Log</button>
-        </div>
-        <pre class="log" id="log-panel"></pre>
-      </section>
+        <!-- ── LOG ── -->
+        <section class="screen logs" data-section="logs">
+          <header class="page-head">
+            <div class="page-titles">
+              <h2>Log aplikasi</h2>
+              <p>Semua aktivitas tool dan aplikasi.</p>
+            </div>
+            <div class="page-actions">
+              <button class="btn secondary small" id="copy-log-btn" aria-label="Salin log yang tampil"><span data-icon="copy" data-size="14"></span><span>Salin Log</span></button>
+            </div>
+          </header>
+          <div class="controls logs-controls">
+            <div class="ctl-group">
+              <span class="ctl-label">Level</span>
+              <div class="seg" id="log-filter" role="radiogroup" aria-label="Filter level log">
+                <button class="btn choice active" data-level="all" role="radio" aria-checked="true">Semua</button>
+                <button class="btn choice" data-level="info" role="radio" aria-checked="false">Info</button>
+                <button class="btn choice" data-level="warn" role="radio" aria-checked="false">Peringatan</button>
+                <button class="btn choice" data-level="error" role="radio" aria-checked="false">Error</button>
+              </div>
+            </div>
+            <div class="ctl-group grow">
+              <span class="ctl-label">Cari</span>
+              <input type="search" class="input search" id="log-search" placeholder="Ketik kata kunci…" aria-label="Cari di log">
+            </div>
+          </div>
+          <section class="panel output-panel">
+            <div class="panel-head"><h3>Riwayat</h3><span class="panel-meta" id="logs-count"></span></div>
+            <div class="log-wrap">
+              <pre class="log" id="log-panel" tabindex="0" aria-label="Log aplikasi"></pre>
+              <div class="log-empty" id="logs-empty"><span data-icon="doc" data-size="28"></span><span id="logs-empty-text">Belum ada log.</span></div>
+            </div>
+          </section>
+        </section>
 
-      <!-- ── SETTINGS ──
-           Opsi B: 3 card (App/Registered Tools/Python) sejajar HORIZONTAL
-           dalam satu baris grid (bukan ditumpuk vertikal). -->
-      <section class="screen settings" data-section="settings">
-        <h2 class="tool-title">Settings</h2>
-        <p class="tool-desc">Current configuration (read-only).</p>
-        <div class="settings-grid">
-          <div class="card">
-            <div class="card-title">App</div>
-            <div class="card-label" id="set-app-name">Name: --</div>
-            <div class="card-label" id="set-app-version">Version: --</div>
+        <!-- ── PENGATURAN (baca-saja) ── -->
+        <section class="screen settings" data-section="settings">
+          <header class="page-head">
+            <div class="page-titles">
+              <h2>Pengaturan</h2>
+              <p>Konfigurasi saat ini (hanya baca). Ubah lewat config.yaml.</p>
+            </div>
+          </header>
+          <div class="settings-grid">
+            <div class="card">
+              <h3 class="card-title">Aplikasi</h3>
+              <dl class="kv">
+                <dt>Nama</dt><dd id="set-app-name">--</dd>
+                <dt>Versi</dt><dd id="set-app-version">--</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <h3 class="card-title">Tool terdaftar</h3>
+              <ul class="plain-list" id="set-tools"><li>--</li></ul>
+            </div>
+            <div class="card">
+              <h3 class="card-title">Python</h3>
+              <dl class="kv">
+                <dt>Versi</dt><dd id="set-py-version">--</dd>
+                <dt>Lokasi</dt><dd id="set-py-exec">--</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <h3 class="card-title">Makro tempel</h3>
+              <dl class="kv">
+                <dt>Hotkey</dt><dd id="set-macro-hotkey">--</dd>
+                <dt>Status</dt><dd id="set-macro-state">--</dd>
+                <dt>Cadangan</dt><dd id="set-macro-alt">--</dd>
+              </dl>
+            </div>
           </div>
-          <div class="card">
-            <div class="card-title">Registered Tools</div>
-            <div class="card-label" id="set-tools">--</div>
-          </div>
-          <div class="card">
-            <div class="card-title">Python</div>
-            <div class="card-label" id="set-py-version">Version: --</div>
-            <div class="card-label" id="set-py-exec">Executable: --</div>
-          </div>
-        </div>
-      </section>
+        </section>
+
+      </div>
     </main>
   </div>
 
-  <!-- ═══ FOOTER ═══ -->
-  <footer class="footer">BOPEL Automation Toolkit — Internal Warehouse Utilities</footer>
-
+  <div class="toast-root" id="toast-root" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
 </html>

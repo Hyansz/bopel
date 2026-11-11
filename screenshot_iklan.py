@@ -404,9 +404,11 @@ def _take_screenshot(hwnd: int, out_path: Path) -> Path | None:
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path)
-    _apply_label_to_image(out_path, out_path.stem.split("_")[0])
-    print(f"📸 Screenshot tersimpan: {out_path}  ({img.size[0]}x{img.size[1]})")
-    return out_path
+    # embed caption into image if enabled via config
+    from core.caption_image import add_caption_to_image
+    captioned_path = add_caption_to_image(out_path)
+    print(f"📸 Screenshot tersimpan: {captioned_path}  ({img.size[0]}x{img.size[1]})")
+    return captioned_path
 
 
 def _capture_store(store: dict, start_date: str, end_date: str, used_hwnds: set[int]) -> tuple[str | None, int | None]:
@@ -459,8 +461,10 @@ def main() -> None:
     end_date = state.get("end_date", "")
 
     if not start_date or not end_date:
-        print("❌ Pilih tanggal AWAL dan AKHIR di UI dulu.")
-        sys.exit(1)
+        print("ℹ Tanggal tidak dipilih — default ke hari ini.")
+        today = datetime.now().strftime("%Y-%m-%d")
+        start_date = start_date or today
+        end_date = end_date or today
 
     stores = [s for s in Config.stores() if s.get("enabled")]
     if not stores:
@@ -482,7 +486,11 @@ def main() -> None:
         print()
 
     if success_paths:
-        caption = bangun_teks_caption(success_stores)
+        caption_lines = []
+        for s in success_stores:
+            sname = s.get("name", "")
+            caption_lines.append(f"Shopee Ads {sname} {datetime.now().strftime('%m %d %Y')}")
+        caption = "\n".join(caption_lines)
         if copy_files_with_caption(success_paths, caption):
             print(f"📌 {len(success_paths)} screenshot + caption tersalin. Paste ke WhatsApp.")
 
