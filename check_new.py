@@ -5,6 +5,7 @@ import pyperclip
 import re
 import sys
 import win32gui
+from decimal import Decimal
 
 from core import window
 from core.config import Config
@@ -14,6 +15,7 @@ UI_MODE = os.environ.get("BOPEL_UI_MODE") == "1"
 SCRIPT_NAME = os.path.basename(__file__)
 GRACE_PASTE_DATA = 5
 FAST = 0.12
+STEP2_VERIFY = False
 
 CODE_PATTERN = re.compile(r'\b26[A-Z0-9]{12,13}\b')
 CLIP_SENTINEL = "__CLIP_EMPTY_SENTINEL__"
@@ -22,6 +24,7 @@ STEP1_ONLY = False                 # Diaktifkan live per konfirmasi user
 STEP2_MODE = "live"                # "off" | "click_test" | "dry" | "live"
 STEP2_MAX_TICKS = None             # None = all; int limit centang buat uji
 BSM_FIRST_ROW_CLICK = (0.768, 0.591)  # (x_ratio, y_ratio) relatif ke window, dari config.yaml
+BSM_TRANSFER_INPUT_CLICK = (0.9368, 0.2580)
 BSM_KEY_DELAY = 0.12               # detik antar tekanan "down"
 BSM_WAIT_AFTER_OPEN = 5.0  # detik tunggu setelah buka .lnk
 
@@ -35,6 +38,17 @@ def _load_bsm_first_row_click():
         except (TypeError, ValueError):
             pass
     return (float(BSM_FIRST_ROW_CLICK[0]), float(BSM_FIRST_ROW_CLICK[1]))
+
+
+def _load_bsm_transfer_input_click():
+    Config.ensure_loaded()
+    t = next((x for x in Config.tools() if x.get("script") == SCRIPT_NAME), None)
+    if t and isinstance(t.get("bsm_transfer_input_click"), list) and len(t["bsm_transfer_input_click"]) == 2:
+        try:
+            return (float(t["bsm_transfer_input_click"][0]), float(t["bsm_transfer_input_click"][1]))
+        except (TypeError, ValueError):
+            pass
+    return (float(BSM_TRANSFER_INPUT_CLICK[0]), float(BSM_TRANSFER_INPUT_CLICK[1]))
 
 
 def safe_copy(delay=FAST, retries=4, settle=0.05, metrik=None):
@@ -67,6 +81,60 @@ def parse_shopee_prices(raw_text, target_codes):
             if cleaned:
                 result[kode] = int(cleaned)
     return result
+
+
+def print_check_table(orders, res, shopee_prices):
+    """Cetak tabel ringkasan dengan format yang diparse app.py (_parse_table_line)."""
+    headers = ["NO", "KODE PESANAN", "NOMOR FAKTUR", "HARGA APLIKASI", "HARGA SHOPEE", "COCOK"]
+    found_map = {f["kode"]: f for f in res["found"]}
+    rows = []
+
+    price_validation_available = len(shopee_prices) > 0
+    if not price_validation_available:
+        print("⚠️ Validasi harga tidak tersedia di check_new (harga Shopee tidak terdeteksi).")
+
+    for i, c in enumerate(orders, 1):
+        found_item = found_map.get(c)
+        p2 = shopee_prices.get(c)
+        p2_str = f"Rp {p2:,}".replace(",", ".") if p2 is not None else "-"
+
+        if found_item:
+            invoice = found_item["invoice"]
+            app_nilai = found_item["nilai"]
+            app_nilai_str = f"Rp {int(app_nilai):,}".replace(",", ".")
+            if price_validation_available and p2 is not None and abs(Decimal(str(p2)) - app_nilai) <= 1:
+                cocok = "OK"
+            elif p2 is not None:
+                cocok = "BEDA"
+            else:
+                cocok = "OK"
+        else:
+            invoice = "-"
+            app_nilai_str = "-"
+            cocok = "?"
+
+        rows.append([str(i), c, invoice, app_nilai_str, p2_str, cocok])
+
+    col_widths = [
+        max(len(headers[idx]), *(len(str(r[idx])) for r in rows)) if rows else len(headers[idx])
+        for idx in range(len(headers))
+    ]
+
+    def line(ch='-'):
+        return "+" + "+".join(ch * (w + 2) for w in col_widths) + "+"
+
+    def fmt_row(r):
+        return "| " + " | ".join(cell.ljust(w) for cell, w in zip(r, col_widths)) + " |"
+
+    print("\n" + "=" * 60)
+    print("TABEL KODE PESANAN + HARGA (CHECK NEW)")
+    print("=" * 60)
+    print(line())
+    print(fmt_row(headers))
+    print(line('='))
+    for r in rows:
+        print(fmt_row(r))
+    print(line())
 
 
 def bsm_window_exists() -> bool:
@@ -122,6 +190,8 @@ def main():
         print("❌ Tidak ada kode pesanan Shopee ditemukan di clipboard.")
         sys.exit(1)
 
+    shopee_prices = parse_shopee_prices(raw, orders)
+
     print(f"\nTotal order Shopee terbaca: {len(orders)}")
     pyperclip.copy("")
 
@@ -171,16 +241,33 @@ def main():
 
     res = bsm_match.match_codes(orders, bsm_raw)
     bsm_match.print_report(res)
+    print_check_table(orders, res, shopee_prices)
 
     total_shopee = res["total_shopee"]
     cocok_n = len(res["found"])
     tidak_n = len(res["missing"])
-    print("Total:", total_shopee)
-    print("Ketemu:", cocok_n, "/", total_shopee)
-    print("Sudah: 0")
-    print("Beda: 0")
-    print("Tidak:", tidak_n)
-    print("Waktu: 1.00 detik")
+
+    ok_count = 0
+    beda_count = 0
+    plan = []
+    cur = 1
+    total_ok = Decimal("0")
+
+    for f in res["found"]:
+        c = f["kode"]
+        p2 = shopee_prices.get(c)
+        app_nilai = f["nilai"]
+        if p2 is not None and abs(Decimal(str(p2)) - app_nilai) <= 1:
+            ok_count += 1
+            total_ok += app_nilai
+            plan.append({"turun": f["baris"] - cur, "baris": f["baris"], "kode": c})
+            cur = f["baris"]
+        else:
+            beda_count += 1
+            print(f"[CEK MANUAL] baris {f['baris']} kode {c}: Shopee {p2} vs aplikasi {app_nilai}")
+
+    print(f"Total: {total_shopee} | Ketemu: {cocok_n} | Sudah: {ok_count} | Beda: {beda_count} | Tidak: {tidak_n}")
+    print(f"Total Harga OK (Nilai): {total_ok:,}")
 
     if res["parser_problems"] or total_shopee == 0:
         print(f"DEBUG: parser_problems={res['parser_problems']}, total_shopee={total_shopee}")
@@ -208,7 +295,6 @@ def main():
     abs_x = rect[0] + int(click_x * w)
     abs_y = rect[1] + int(click_y * h)
 
-    print(f"Klik awal di: {abs_x}, {abs_y} (Window: {w}x{h})")
     if STEP2_MODE != "click_test":
         pyautogui.click(abs_x, abs_y)
         time.sleep(0.4)
@@ -216,7 +302,6 @@ def main():
         sys.exit(0)
 
     # Navigasi & centang
-    plan = res["plan"]
     if STEP2_MAX_TICKS:
         plan = plan[:STEP2_MAX_TICKS]
         print(f"Dibatasi uji: hanya {len(plan)} centang")
@@ -234,15 +319,34 @@ def main():
                 pyautogui.press('down')
                 time.sleep(BSM_KEY_DELAY)
 
-        label = f"-> baris {step['baris']} kode {step['kode']}"
-        print(label)
-
         if STEP2_MODE == "live":
             pyautogui.press('space')
             time.sleep(0.3)
-            print(f"[OK] dicentang baris {step['baris']}")
         elif STEP2_MODE == "dry":
             time.sleep(0.8)
+
+    if STEP2_MODE == "live" and ok_count > 0:
+        print("Mengisi total harga OK ke kolom input Transfer...")
+        tx, ty = _load_bsm_transfer_input_click()
+        abs_tx = rect[0] + int(tx * w)
+        abs_ty = rect[1] + int(ty * h)
+        pyautogui.click(abs_tx, abs_ty)
+        time.sleep(0.3)
+        pyautogui.hotkey('ctrl', 'a')
+        time.sleep(0.2)
+        amount_str = f"{int(total_ok)}"
+        pyautogui.write(amount_str, interval=0.05)
+        time.sleep(0.3)
+        print(f"[OK] Total harga otomatis diisi ke input Transfer.")
+
+    # Mengembalikan fokus ke window Bopel Automation Toolkit
+    try:
+        bopel_win = window.find_target_window("Bopel Automation Toolkit")
+        if bopel_win:
+            window.activate_window(bopel_win[0])
+            print("[OK] Fokus dikembalikan ke Bopel Automation Toolkit.")
+    except Exception as exc:
+        print(f"⚠️ Gagal mengembalikan fokus ke Bopel: {exc}")
 
     print("Selesai. JANGAN lupa cek lalu simpan manual (F10/F11). Bot tidak menyimpan.")
 

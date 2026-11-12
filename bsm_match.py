@@ -1,4 +1,5 @@
 import re
+import os
 from parse_bsm import parse_page
 
 
@@ -26,7 +27,7 @@ def match_codes(shopee_codes, page_text: str) -> dict:
         if len(hits) > 1:
             dups.append((k, [h["no"] for h in hits]))
         h = hits[0]
-        found.append({"kode": k, "baris": h["no"], "invoice": h["invoice"], "net": h["net"]})
+        found.append({"kode": k, "baris": h["no"], "invoice": h["invoice"], "net": h["net"], "nilai": h["nilai"]})
     found.sort(key=lambda x: x["baris"])
     extra = [r for r in page["rows"] if r["kode"] not in seen]
     plan, cur = [], 1
@@ -54,6 +55,9 @@ def print_report(res: dict) -> None:
     if res["missing"]:
         print("Tidak ketemu di aplikasi:", ", ".join(res["missing"]))
     if res["extra"]:
-        print("Ada di aplikasi tapi tidak di Shopee (tidak akan dicentang):")
-        for r in res["extra"]:
-            print(f"{r['no']:>5}  {r['kode']}  {r['invoice']}")
+        print(f"Baris lain di aplikasi (tidak dicentang): {len(res['extra'])}")
+        os.makedirs("logs", exist_ok=True)
+        with open(r"logs\bsm_match_last.txt", "w", encoding="utf-8") as f:
+            f.write("BARIS  KODE              INVOICE\n")
+            for r in res["extra"]:
+                f.write(f"{r['no']:>5}  {r['kode']}  {r['invoice']}\n")

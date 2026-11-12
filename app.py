@@ -722,6 +722,51 @@ class Api:
             pass
 
 
+def _apply_window_icon() -> None:
+    """Pasang ikon BOPEL.ico ke window taskbar & title bar via Windows API (WM_SETICON)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ico_path = Path(__file__).resolve().parent / "assets" / "bopel.ico"
+        if not ico_path.exists():
+            print(f"[WARNING] Ikon {ico_path} tidak ditemukan, lanjut tanpa ikon.")
+            return
+
+        user32 = ctypes.windll.user32
+        title = "Bopel Automation Toolkit"
+        hwnd = None
+        for _ in range(50):
+            hwnd = user32.FindWindowW(None, title)
+            if hwnd:
+                break
+            time.sleep(0.1)
+
+        if not hwnd:
+            return
+
+        IMAGE_ICON = 1
+        LR_LOADFROMFILE = 0x0010
+        LR_DEFAULTSIZE = 0x0040
+        WM_SETICON = 0x0080
+        ICON_SMALL = 0
+        ICON_BIG = 1
+
+        hicon_small = user32.LoadImageW(
+            None, str(ico_path), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE
+        )
+        hicon_big = user32.LoadImageW(
+            None, str(ico_path), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE
+        )
+
+        if hicon_small:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon_small)
+        if hicon_big:
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon_big)
+    except Exception as exc:
+        print(f"[WARNING] Gagal memasang ikon window: {exc}")
+
+
 def main() -> None:
     import webview  # lazy import supaya `python -c "import app"` tetap ringan
     from core.paste_macro import init_hotkey
@@ -747,6 +792,13 @@ def main() -> None:
         print(f"\n[ERROR] {exc}")
         sys.exit(1)
 
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("BOPEL.Toolkit")
+        except Exception:
+            pass
+
     api = Api(ToolLauncher())
     window = webview.create_window(
         "Bopel Automation Toolkit",
@@ -767,12 +819,14 @@ def main() -> None:
     #    ini nutup race kalau restore pertama kena saat form belum selesai
     #    layout (race diam-diam yang bikin window balik ke belakang).
     window.events.shown += api.bring_to_front
+    window.events.shown += lambda: threading.Thread(target=_apply_window_icon, daemon=True).start()
 
     def _ensure_foreground_delayed() -> None:
         time.sleep(1.5)
         api.bring_to_front()
 
     threading.Thread(target=_ensure_foreground_delayed, daemon=True).start()
+    threading.Thread(target=_apply_window_icon, daemon=True).start()
 
     webview.start()
 
