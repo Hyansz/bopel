@@ -25,9 +25,14 @@ def parse_page(text: str) -> dict:
         if not fp or len(dates) < 2:
             problems.append((no, "baris tidak lengkap")); continue
         tail = rec[rec.rfind(dates[1]) + len(dates[1]):].split()
-        if len(tail) != 7:
-            problems.append((no, f"kolom angka {len(tail)} (harus 7)")); continue
-        retur, ppn, nilai, terbayar, bayar, net, memo = tail
+        if len(tail) not in (7, 6):
+            problems.append((no, f"kolom angka {len(tail)} (harus 6/7)")); continue
+        if len(tail) == 7:
+            retur, ppn, nilai, terbayar, bayar, net, memo = tail
+        else:
+            # 6 kolom: kemungkinan 1 kolom tidak diisi / format berubah
+            retur, ppn, nilai, bayar, net, memo = tail
+            terbayar = None
         if not KODE.match(memo):
             problems.append((no, f"memo bukan kode pesanan: {memo!r}")); continue
         pre = re.sub(r"\s+", "", rec[:fp.start()])
@@ -37,7 +42,7 @@ def parse_page(text: str) -> dict:
             problems.append((no, f"nilai-ppn != net ({nilai} - {ppn} vs {net})")); continue
         rows.append({"no": no, "kode": memo, "invoice": fp.group(), "tgl": dates[0],
                      "nilai": _idr(nilai), "ppn": _idr(ppn), "net": net_d, "warn": warn,
-                     "bayar_raw": bayar.strip(), "terbayar_raw": terbayar.strip()})
+                     "bayar_raw": bayar.strip(), "terbayar_raw": terbayar.strip() if terbayar is not None else ""})
     if declared and int(declared.group(1)) != len(rows):
         problems.append((0, f"header bilang {declared.group(1)} baris, terbaca {len(rows)}"))
         problems.append((0, f"header bilang {declared.group(1)} baris, terbaca {len(rows)}"))

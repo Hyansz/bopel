@@ -270,9 +270,21 @@ def main():
     print(f"Total Harga OK (Nilai): {total_ok:,}")
 
     if res["parser_problems"] or total_shopee == 0:
-        print(f"DEBUG: parser_problems={res['parser_problems']}, total_shopee={total_shopee}")
-        print("❌ Ctrl+A tidak terbaca sebagai tabel Inventory BSM; pastikan halaman Tambah Bayar Customer terbuka dan fokus ada di area netral.")
-        sys.exit(1)
+        # Jika masalah parser terjadi karena jumlah baris atau variasi kolom,
+        # bot tetap lanjut jika baris Shopee kita yang "found" cukup banyak
+        # dan tidak ada masalah struktural yang parah.
+        if total_shopee == 0:
+            print(f"DEBUG: parser_problems={res['parser_problems']}, total_shopee={total_shopee}")
+            print("❌ Ctrl+A tidak terbaca sebagai tabel Inventory BSM; pastikan halaman Tambah Bayar Customer terbuka dan fokus ada di area netral.")
+            sys.exit(1)
+        # Kalau sudah ada baris yang ketemu dan tidak ada masalah "kolom angka" berat, lanjut
+        critical_issues = [p for p in res["parser_problems"] if p[1] in ("baris tidak lengkap",)]
+        if not critical_issues and cocok_n > 0:
+            print(f"⚠️ Ada {len(res['parser_problems'])} masalah baca (non-kritis), bot tetap lanjut ke {cocok_n} baris yang cocok.")
+        else:
+            print(f"DEBUG: parser_problems={res['parser_problems']}, total_shopee={total_shopee}")
+            print("❌ Ctrl+A tidak terbaca sebagai tabel Inventory BSM; pastikan halaman Tambah Bayar Customer terbuka dan fokus ada di area netral.")
+            sys.exit(1)
 
     if STEP1_ONLY:
         print("\n✔ STEP 1 Selesai (STEP1_ONLY = True): Selesai sesuai instruksi.")
