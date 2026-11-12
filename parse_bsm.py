@@ -31,8 +31,34 @@ def parse_page(text: str) -> dict:
             retur, ppn, nilai, terbayar, bayar, net, memo = tail
         else:
             # 6 kolom: kemungkinan 1 kolom tidak diisi / format berubah
-            retur, ppn, nilai, bayar, net, memo = tail
-            terbayar = None
+            # Mencari token KODE (12-15 karakter alphanumerik) untuk menentukan posisi memo & net
+            idx_memo = -1
+            for j in range(len(tail)):
+                if KODE.match(tail[j]):
+                    idx_memo = j
+                    break
+            if idx_memo != -1:
+                memo = tail[idx_memo]
+                # net selalu 1 token sebelum memo
+                net = tail[idx_memo - 1] if idx_memo > 0 else "0"
+                # nilai: cari token yang cocok dengan net + ppn
+                ppn = tail[idx_memo - 2] if idx_memo > 1 else "0"
+                ppn_d = _idr(ppn)
+                net_d_check = _idr(net)
+                nilai = None
+                for j in range(len(tail)):
+                    if j == idx_memo or j == idx_memo - 1 or j == idx_memo - 2:
+                        continue
+                    token_val = _idr(tail[j])
+                    if abs(token_val - ppn_d - net_d_check) < Decimal("0.02"):
+                        nilai = tail[j]
+                        break
+                if nilai is None:
+                    problems.append((no, f"kolom 6 tidak lengkap / membingungkan: {tail}")); continue
+                terbayar, bayar, retur = "", "", ""
+            else:
+                # Kalau tidak ada yang cocok KODE, abaikan
+                problems.append((no, f"tidak ditemukan kode pesanan: {tail}")); continue
         if not KODE.match(memo):
             problems.append((no, f"memo bukan kode pesanan: {memo!r}")); continue
         pre = re.sub(r"\s+", "", rec[:fp.start()])
