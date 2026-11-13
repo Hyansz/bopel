@@ -4,27 +4,14 @@ app:
   subtitle: Internal Warehouse Utilities
 
 tools:
-  - name: Checklist Automation - New
+  - name: Checklist Automation
     script: check_new.py
     description: Checklist pesanan dan validasi harga Shopee vs aplikasi (Inventory BSM)
     target_window_title: Inventory BSM
     uses_stores: true
     shortcut: C:\Users\PC\Desktop\Inventory BSM.lnk
     bsm_first_row_click: [0.768, 0.591]
-
-  - name: Checklist Automation
-    script: check.py
-    description: Checklist pesanan dan validasi harga Shopee vs aplikasi
-    target_window_title: Inventorycabang
-    # Auto-Fetch Shopee (2026-08-19, dipindah dari tool terpisah ke sini):
-    # selector toko + tombol "Fetch dari Shopee" di ToolScreen tool ini.
-    # Fetcher (shopee_fetch.py) membuka Chrome profile toko yang SAMA
-    # dengan shortcut desktop (Profile 7 = Toko Alkes Solo) via Playwright
-    # persistent context -> cookie login ke-reuse. Hasil Ctrl+A/C halaman
-    # income (blok Dana Dilepaskan, 6 baris/pesanan) LANGSUNG dipakai
-    # check.py STEP 1 (kode via regex + harga Shopee dari blok per kode —
-    # diverifikasi kompatibel 2026-08-19, lihat logs/session_report.md).
-    uses_stores: true
+    bsm_transfer_input_click: [0.9368, 0.2580]
 
   - name: Screenshot Iklan
     script: screenshot_iklan.py
@@ -36,7 +23,9 @@ tools:
   - name: Inventory Scanner
     script: scan.py
     description: Scan status pembayaran dan validasi Excel
-    target_window_title: Inventorycabang
+    target_window_title: Inventory BSM
+    shortcut: C:\Users\PC\Desktop\Inventory BSM.lnk
+    bsm_search_click: [0.4512, 0.2089]
     # 2 mode eksekusi: 1 tool, beberapa tombol.
     # Auto-detect dari format clipboard (tabel Excel 'No. Pesanan' = besar/detail, kode polos = kecil/kode pesanan).
     modes:

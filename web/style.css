@@ -70,12 +70,8 @@ button { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--border);
 }
 .hd-left, .hd-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.hd-logo {
-  width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
-  display: grid; place-items: center;
-  background: var(--accent); color: var(--on-accent);
-  font: 700 var(--fs-16)/1 var(--font-head);
-}
+.hd-logo { width: 28px; height: 28px; flex-shrink: 0; display: block; }
+.hd-logo svg { display: block; }
 .hd-title { font: 600 var(--fs-16)/1 var(--font-head); white-space: nowrap; }
 .hd-ver {
   font: 500 var(--fs-12)/1 var(--font-mono); color: var(--text-muted);
@@ -428,15 +424,34 @@ svg .draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw .35s ease
 .toast.info .toast-ic { color: var(--info); }
 .toast-ic { display: grid; place-items: center; flex-shrink: 0; }
 
-/* ── splash ───────────────────────────────────────────────────────── */
+/* ── splash: robot di tengah -> geser kiri, wajah jadi centang -> BOPEL -> subjudul ── */
 #splash {
   position: fixed; inset: 0; z-index: 9999;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  display: grid; place-items: center;
   background: var(--bg); pointer-events: none;
 }
-.splash-mark { font: 700 44px/1 var(--font-head); letter-spacing: .14em; color: var(--text); animation: splashIn .36s var(--ease) both; }
-.splash-sub { font-size: var(--fs-14); letter-spacing: .24em; color: var(--text-muted); animation: splashIn .36s var(--ease) .06s both; }
-#splash.splash-hide { opacity: 0; transition: opacity .22s ease-out; }
+#splash:not(.go) * { animation-play-state: paused; }
+.splash-lockup { position: relative; display: flex; align-items: center; gap: 24px; --shift: 0px; }
+.splash-bot { width: 84px; flex-shrink: 0; transform: translateX(var(--shift)); animation: botSlide .8s cubic-bezier(.65, 0, .35, 1) 1s forwards; }
+.splash-bot svg { display: block; width: 100%; height: auto; opacity: 0; animation: botIn .45s var(--ease) .05s forwards; }
+.sp-eye, .sp-mouth, .sp-spin { transform-box: fill-box; transform-origin: center; }
+.sp-eye { animation: blink .22s ease-in-out .65s, faceOut .25s ease-in 1s forwards; }
+.sp-mouth { animation: faceOut .25s ease-in 1s forwards; }
+.sp-spin { opacity: 0; animation: spinner .9s linear 1.05s forwards; }
+.sp-tick { stroke-dasharray: 1; stroke-dashoffset: 1; animation: tickIn .4s ease-out 1.95s forwards; }
+.splash-mark { margin-right: -.14em; font: 700 48px/1 var(--font-head); letter-spacing: .14em; color: var(--text); opacity: 0; animation: textIn .5s var(--ease) 1.55s forwards; }
+/* layout "wide": subjudul di bawah, panjangnya = ikon + BOPEL (letter-spacing dihitung app.js) */
+.splash-sub {
+  position: absolute; top: calc(100% + 18px); left: 0; white-space: nowrap;
+  text-transform: uppercase; font-size: var(--fs-16); font-weight: 500; letter-spacing: .3em; color: var(--text-muted);
+  opacity: 0; animation: subIn .45s var(--ease) 2.4s forwards;
+}
+/* layout "stack": ikon besar | BOPEL di atas Automation Toolkit, rata kiri */
+.splash-lockup[data-layout="stack"] .splash-bot { width: 112px; }
+.splash-lockup[data-layout="stack"] .splash-sub {
+  position: static; margin-top: 12px; text-transform: none; font-size: var(--fs-14); letter-spacing: .24em;
+}
+#splash.splash-hide { opacity: 0; transition: opacity .25s ease-out; }
 
 /* ── scrollbar ────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -466,12 +481,25 @@ svg .draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw .35s ease
 @keyframes draw { to { stroke-dashoffset: 0; } }
 @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes toastOut { to { opacity: 0; transform: translateY(8px); } }
-@keyframes splashIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes botIn { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+@keyframes botSlide { from { transform: translateX(var(--shift)); } to { transform: none; } }
+@keyframes blink { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(.1); } }
+@keyframes faceOut { to { opacity: 0; transform: scale(.4); } }
+@keyframes spinner {
+  0% { opacity: 0; transform: scale(.4) rotate(0deg); }
+  15% { opacity: 1; transform: scale(1) rotate(120deg); }
+  85% { opacity: 1; transform: scale(1) rotate(560deg); }
+  100% { opacity: 0; transform: scale(.6) rotate(720deg); }
+}
+@keyframes tickIn { to { stroke-dashoffset: 0; } }
+@keyframes textIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+@keyframes subIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: .01ms !important;
   }
   .global-progress span, .progress.indeterminate .progress-fill { animation: none; width: 100%; }

@@ -1,3 +1,38 @@
+# Session Report — 2026-11-13 (Update Scan Flow for Inventory BSM New Version)
+
+## Ringkasan
+- Mengubah alur scan di `scan.py` agar cocok dengan aplikasi Inventory BSM versi baru (web app).
+- Menambahkan modul `core/bsm.py` untuk penanganan window "Inventory BSM", aktivasi foreground, peluncuran via shortcut, dan refresh (F5) sekali per run.
+- Menambahkan modul `core/parsing_bsm.py` untuk memparsing teks halaman web app BSM baru yang disalin lewat `Ctrl+A` + `Ctrl+C`.
+- Memperbarui `config.yaml` untuk tool "Inventory Scanner" (target window, shortcut, koordinat klik pencarian).
+- Membuat skrip penunjang `tools_capture_bsm.py` dan `live_test_scan_bsm.py` untuk pengujian sampel dan visual.
+
+## Root Cause / Alur Baru
+- Aplikasi warehouse lama (`Inventorycabang`) diganti dengan web app `Inventory BSM`. Alur navigasi grid berbasis panah (`Down`/`Up`) diganti dengan klik koordinat absolut pada kotak pencarian, `Ctrl+A`/`Ctrl+V`/`Enter`, keluar via `Tab`, lalu `Ctrl+A`/`Ctrl+C` untuk membaca seluruh teks halaman dan diparsing secara aman.
+
+## Status Testing
+- [x] Test suite pytest 28/28 lulus.
+- [ ] Tes live visual dengan aplikasi nyata (menunggu eksekusi langsung oleh user).
+
+---
+
+# Session Report — 2026-11-12 (Fix Price Validation NILAI vs Shopee in `check_new.py`)
+
+## Ringkasan
+- Memperbaiki validasi harga di `check_new.py` dan `bsm_match.py`: harga Shopee kini dibandingkan dengan kolom **NILAI** (harga kotor) Inventory BSM (bukan NET), dengan toleransi pembulatan `abs(harga_shopee - nilai) <= 1` rupiah.
+- Menambahkan field `nilai` pada item `found` di `bsm_match.py`.
+- Menerapkan **gating centang**: baris dengan harga BEDA tidak dicentang (`space`), dicatat di ringkasan `Beda:`, dan dicetak sebagai `[CEK MANUAL] baris N kode X: Shopee <harga> vs aplikasi <nilai>`. Plan navigasi `turun` dihitung ulang hanya untuk baris `OK`.
+- Menambahkan unit test validasi harga (`test_price_validation_rules`) di `test_check_new_items.py`.
+
+## Root Cause / Detail Perubahan
+- Validasi harga sebelumnya membandingkan dengan `net` (harga setelah PPN/potongan), yang menyebabkan data nyata (seperti 120385, 39295, dll.) salah terbaca sebagai `BEDA` dan tidak ter-gate dengan benar.
+
+## Status Testing
+- Unit test baru dan pengujian harga lulus.
+- BELUM terbukti secara visual langsung: menu New dengan data Shopee + Inventory BSM asli sampai panel salin terisi pada sesi GUI nyata.
+
+---
+
 # Session Report — 2026-11-12 (Fix Crash `check_new.py`, Unit Test Komprehensif, & Revisi Log Extra Rows)
 
 ## Ringkasan

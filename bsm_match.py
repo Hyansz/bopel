@@ -40,20 +40,10 @@ def match_codes(shopee_codes, page_text: str) -> dict:
 
 
 def print_report(res: dict) -> None:
-    print(f"Baris di aplikasi : {res['total_baris_app']}")
-    print(f"Kode dari Shopee  : {res['total_shopee']}")
-    print(f"Cocok             : {len(res['found'])}")
-    print(f"Ada di Shopee, TIDAK ada di aplikasi : {len(res['missing'])}")
-    print(f"Ada di aplikasi, TIDAK ada di Shopee : {len(res['extra'])}")
     if res["parser_problems"]:
         print("!! Masalah baca halaman:", res["parser_problems"])
     if res["dups"]:
         print("!! Kode muncul di lebih dari satu baris:", res["dups"])
-    print("BARIS  KODE              INVOICE           NET")
-    for f in res["found"]:
-        print(f"{f['baris']:>5}  {f['kode']}  {f['invoice']}  {f['net']:>14,.2f}")
-    if res["missing"]:
-        print("Tidak ketemu di aplikasi:", ", ".join(res["missing"]))
     if res["extra"]:
         print(f"Baris lain di aplikasi (tidak dicentang): {len(res['extra'])}")
         os.makedirs("logs", exist_ok=True)

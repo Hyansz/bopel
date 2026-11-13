@@ -282,11 +282,19 @@ function setProgress(st) {
   fill.style.transform = cls === "running" ? "" : `scaleX(${cls === "finished" || cls === "failed" ? 1 : 0})`;
 }
 
+/* tool yang wajib memilih Manual/Otomatis dulu: Checklist (toko+Fetch) dan tool
+   dengan auto_open_app (Otomatis = membuka aplikasi desktop, mis. Inventory BSM) */
+function needsDataMode(tool) {
+  if (!tool) return false;
+  if (tool.auto_open_app) return true;
+  return !!(tool.uses_stores && STORES.length && (tool.modes?.length || !tool.date_range));
+}
+
 function startHint(st) {
   if (st && st.running) return "";
   const fetchSt = toolStates["shopee_fetch.py"];
   if (fetchSt && fetchSt.running) return "Menunggu Fetch selesai";
-  if (currentTool && currentTool.uses_stores && STORES.length && !currentTool.date_range && !dataMode) return "Pilih mode dulu";
+  if (currentTool && !currentTool.modes?.length && needsDataMode(currentTool) && !dataMode) return "Pilih mode dulu";
   if (currentTool && Array.isArray(currentTool.modes) && currentTool.modes.length && !lastModeRun[currentTool.script]) return "Pilih mode dulu";
   return "";
 }
@@ -294,7 +302,7 @@ function startHint(st) {
 function startDisabled(st) {
   if (st && st.running) return true;
   if (toolStates["shopee_fetch.py"] && toolStates["shopee_fetch.py"].running) return true;
-  if (currentTool && currentTool.uses_stores && STORES.length && !currentTool.date_range && !dataMode) return true;
+  if (currentTool && !currentTool.modes?.length && needsDataMode(currentTool) && !dataMode) return true;
   if (currentTool && Array.isArray(currentTool.modes) && currentTool.modes.length && !lastModeRun[currentTool.script]) return true;
   return false;
 }
@@ -424,6 +432,10 @@ function updateHelp(tool) {
   if (hasModes) {
     const m = tool.modes.find((x) => x.name === lastModeRun[tool.script]);
     setHelp(m ? (m.description || "") : "Pilih mode untuk melanjutkan.");
+  } else if (tool.auto_open_app) {
+    setHelp(dataMode === "otomatis" ? `Aplikasi ${tool.auto_open_app} dibuka otomatis. Setelah siap, tekan Start.`
+      : dataMode === "manual" ? "Siapkan data sendiri, lalu tekan Start."
+      : "Pilih mode untuk melanjutkan.");
   } else setHelp("");
 }
 
@@ -463,8 +475,7 @@ function renderToolHeader(tool) {
   $("#tool-name").textContent = tool.name;
   $("#tool-desc").textContent = tool.description || "";
   renderModeSeg(tool);
-  const usesStores = !!(tool.uses_stores && STORES.length);
-  if (usesStores) dataMode = null;
+  if (needsDataMode(tool)) dataMode = "otomatis"; // Default ke mode otomatis
   fetchRange = null;
   refreshModeButtons(tool);
   renderDataModeButtons(tool);
@@ -474,9 +485,9 @@ function renderToolHeader(tool) {
 
 function renderDataModeButtons(tool) {
   const box = $("#data-mode-btns");
-  const needsDataMode = !!(tool && tool.uses_stores && STORES.length && (tool.modes?.length || (!tool.date_range)));
-  box.classList.toggle("hidden", !needsDataMode);
-  if (!needsDataMode) { syncZones(); return; }
+  const needMode = needsDataMode(tool);
+  box.classList.toggle("hidden", !needMode);
+  if (!needMode) { syncZones(); return; }
   box.innerHTML = "";
   for (const [label, val] of [["Manual", "manual"], ["Otomatis", "otomatis"]]) {
     const b = document.createElement("button");
@@ -486,12 +497,14 @@ function renderDataModeButtons(tool) {
     b.setAttribute("aria-checked", dataMode === val ? "true" : "false");
     b.title = val === "manual"
       ? "Salin data Shopee sendiri, lalu klik Start"
-      : "Ambil data dari Chrome toko lewat Fetch, lalu klik Start";
+      : (tool.auto_open_app ? `Buka aplikasi ${tool.auto_open_app}, lalu klik Start`
+        : "Ambil data dari Chrome toko lewat Fetch, lalu klik Start");
     b.addEventListener("click", () => {
       dataMode = val;
       renderDataModeButtons(tool);
       applyDataModeUI(tool);
       updateHelp(tool);
+      if (val === "otomatis" && tool.auto_open_app) openDesktopApp(tool.auto_open_app);
     });
     box.appendChild(b);
   }
@@ -557,6 +570,22 @@ function renderDatePresets() {
 
 function currentDateRange() {
   return { start: fetchRange ? fetchRange.start : todayISO(), end: fetchRange ? fetchRange.end : todayISO() };
+}
+
+/* Otomatis pada tool auto_open_app: minta Python membuka aplikasi desktop.
+   Hanya nama (kunci di config.yaml desktop_apps) yang dikirim, bukan path. */
+async function openDesktopApp(name) {
+  const api = bridgeApi();
+  if (!api || typeof api.open_desktop_app !== "function") {
+    showToast(`Tidak bisa membuka ${name}: fitur belum tersedia di aplikasi`, "error", 3600);
+    return;
+  }
+  showToast(`Membuka ${name}…`, "info", 1800);
+  try {
+    const res = await api.open_desktop_app(name);
+    if (res && res.ok) showToast(`${name} dibuka`, "success");
+    else showToast(`Gagal membuka ${name}: ${(res && res.message) || "alasan tidak diketahui"}`, "error", 4200);
+  } catch (err) { showToast(`Gagal membuka ${name}: ${err}`, "error", 4200); }
 }
 
 function pushActiveStore(api, name) {
@@ -694,21 +723,38 @@ function showScreenshotPreviews(key, items) {
 function onShotCopyClick() {}
 
 /* ── salin per kolom → Excel ──────────────────────────────────────── */
+/* Bar salin per kolom: selalu tampil di tool Checklist (agar fiturnya terlihat); tombol aktif
+   setelah Python mengirim data lewat pushItems(key, items). */
+const COPY_TOOLS = new Set(["check.py", "check_new.py"]);
+
 function renderCopyBar(st) {
   const bar = $("#copy-bar");
+  const supports = !!(currentTool && COPY_TOOLS.has(currentTool.script));
   const hasItems = !!(st && Array.isArray(st.items) && st.items.length > 0);
-  bar.classList.toggle("hidden", !hasItems);
-  if (!hasItems) return;
+  bar.classList.toggle("hidden", !(hasItems || supports));
+  if (!(hasItems || supports)) return;
   const sel = $("#copy-filter");
-  if (sel.value !== st.copyFilter) sel.value = st.copyFilter;
-  const rows = st.items.filter((it) => it.kategori === st.copyFilter);
-  $("#copy-count").textContent = rows.length ? `${rows.length} item, baris sejajar di ketiga kolom` : "0 item";
+  const filter = st ? st.copyFilter : "ok";
+  if (sel.value !== filter) sel.value = filter;
+  const rows = hasItems ? st.items.filter((it) => it.kategori === filter) : [];
+  let note;
+  if (!hasItems) {
+    note = st && st.statusCls === "finished"
+      ? "Proses selesai, tetapi tidak ada data yang dikirim untuk disalin"
+      : st && st.running ? "Tersedia setelah proses selesai" : "Tersedia setelah proses dijalankan";
+  } else {
+    note = rows.length ? `${rows.length} item, baris sejajar di ketiga kolom` : "Tidak ada item di status ini";
+  }
+  $("#copy-count").textContent = note;
+  bar.querySelectorAll(".btn").forEach((b) => (b.disabled = !rows.length));
+  sel.disabled = !hasItems;
 }
 
 function copyColumn(field, btn) {
   if (!activeRun) return;
   const st = toolStateOf(activeRun.key);
   const rows = st.items.filter((it) => it.kategori === st.copyFilter);
+  if (!rows.length) { showToast("Tidak ada data untuk disalin", "info"); return; }
   const text = rows.map((r) => {
     const v = r[field] != null ? r[field] : "";
     if (field === "harga_shopee" && /^\d+$/.test(v)) return Number(v).toLocaleString("en-US");
@@ -1191,14 +1237,58 @@ document.addEventListener("DOMContentLoaded", () => {
   dismissSplash();
 });
 
+/* Splash: robot di tengah -> geser ke kiri sambil wajah jadi centang -> tulisan BOPEL ->
+   subjudul. Posisi akhir tetap di tengah layar. Lama total = SPLASH_MS sejak animasi mulai. */
+/* Sejajarkan pusat HURUF kapital BOPEL dengan pusat KEPALA robot (bukan kotak gambar yang
+   ikut menghitung antena). Dihitung dari metrik font yang benar-benar terpakai. */
+function alignMarkToHead(sp) {
+  try {
+    const mark = sp.querySelector(".splash-mark");
+    const svgEl = sp.querySelector(".splash-bot svg");
+    const cs = getComputedStyle(mark);
+    const ctx = document.createElement("canvas").getContext("2d");
+    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const m = ctx.measureText("BOPEL");
+    const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize);
+    const baseline = (lh - (m.fontBoundingBoxAscent + m.fontBoundingBoxDescent)) / 2 + m.fontBoundingBoxAscent;
+    const capCenter = baseline - m.actualBoundingBoxAscent / 2;      // dari atas kotak teks
+    const scale = svgEl.getBoundingClientRect().height / 78;         // tinggi viewBox robot = 78
+    const headOffset = (50 - 42) * scale;                            // pusat kepala (y=50) vs pusat viewBox (y=42)
+    mark.style.translate = `0 ${(headOffset + lh / 2 - capCenter).toFixed(1)}px`;
+  } catch (e) { /* abaikan: tetap tampil, hanya tanpa penyelarasan halus */ }
+}
+
+const SPLASH_MS = 3400;
+const SPLASH_LAYOUT = "wide";   // "wide": subjudul selebar ikon+BOPEL | "stack": ikon besar, teks rata kiri
 function dismissSplash() {
   const sp = document.getElementById("splash");
   if (!sp) return;
-  const wait = Math.max(0, 1000 - performance.now());
-  setTimeout(() => {
-    sp.classList.add("splash-hide");
-    setTimeout(() => sp.remove(), 260);
-  }, wait);
+  const lock = sp.querySelector(".splash-lockup");
+  const bot = sp.querySelector(".splash-bot");
+  const text = sp.querySelector(".splash-text");
+  const sub = sp.querySelector(".splash-sub");
+  const start = () => {
+    if (lock) lock.dataset.layout = SPLASH_LAYOUT;
+    if (SPLASH_LAYOUT === "wide") alignMarkToHead(sp);
+    if (SPLASH_LAYOUT === "wide" && lock && sub) {      // regangkan huruf subjudul sampai selebar ikon+BOPEL
+      sub.style.letterSpacing = "0px";
+      const w0 = sub.getBoundingClientRect().width, n = sub.textContent.length;
+      if (n > 1) sub.style.letterSpacing = Math.max(0, (lock.offsetWidth - w0) / (n - 1)) + "px";
+    }
+    if (lock && bot && text) {
+      const shift = (text.offsetLeft + text.offsetWidth - bot.offsetLeft - bot.offsetWidth) / 2;
+      lock.style.setProperty("--shift", shift + "px");
+    }
+    sp.classList.add("go");
+    setTimeout(() => {
+      sp.classList.add("splash-hide");
+      setTimeout(() => sp.remove(), 280);
+    }, REDUCE_MOTION ? 900 : SPLASH_MS);
+  };
+  const fontsReady = document.fonts && document.fonts.ready
+    ? Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 700))])
+    : Promise.resolve();
+  fontsReady.then(start);
 }
 
 function applyConfig(cfg) {
@@ -1214,6 +1304,7 @@ function applyConfig(cfg) {
       name: t.name, script: t.script, description: t.description || "",
       modes: t.modes || [], uses_stores: !!t.uses_stores,
       date_range: !!t.date_range,
+      auto_open_app: t.auto_open_app || null,
     }));
     renderSidebar(TOOLS);
   }

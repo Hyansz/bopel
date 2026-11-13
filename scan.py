@@ -18,6 +18,8 @@ from core.observ import (
 )
 from core.parsing import cari_baris_memo_terpecah, gabungkan_baris_terpecah
 from core.parsing import catatan_retur_shopee, deteksi_retur_shopee
+from core import bsm
+from core.parsing_bsm import parse_bsm_page
 
 # =============================
 # CONFIG — SILAKAN TUNING DI SINI
@@ -32,6 +34,7 @@ SCRIPT_NAME = os.path.basename(__file__)
 # (python scan.py --resume). Tanpa flag = scan SELALU dari nol, checkpoint
 # lama diabaikan (ditimpa pas autosave pertama).
 RESUME = "--resume" in sys.argv
+CLICK_TEST = "--click-test" in sys.argv
 
 # Grace delay baca clipboard di mode UI: user copy data Shopee DULU, lalu
 # klik Start; clipboard dibaca otomatis N detik setelah Start (tanpa
@@ -612,9 +615,17 @@ else:
     # (target_window_title). Kalau gak ketemu -> pesan error jelas + exit 1
     # (bukan crash; UI nampilin sebagai tool gagal). Di luar mode UI tetap
     # alt-tab manual seperti lama.
-    window.persiapkan_window_target(SCRIPT_NAME, required=UI_MODE)
-    print("Klik SEARCH NOMOR — window warehouse sudah dibawa ke depan otomatis")
-    print("Cursor harus berkedip")
+    # window.persiapkan_window_target(SCRIPT_NAME, required=UI_MODE)
+    if not bsm.activate_and_refresh_bsm():
+        sys.exit(1)
+    if CLICK_TEST:
+        coords = bsm.get_search_click_coords()
+        if coords:
+            pyautogui.click(coords)
+            ambil_screenshot("click_test", "TEST")
+        sys.exit(0)
+    # print("Klik SEARCH NOMOR — window warehouse sudah dibawa ke depan otomatis")
+    # print("Cursor harus berkedip")
 
     if UI_MODE:
         print(f"⏳ Mulai dalam {GRACE_PASTE_DATA} detik — klik kotak SEARCH sekarang...")
@@ -701,249 +712,39 @@ else:
         return "SELISIH", harga_excel
 
     def find_data_row(expected):
-        """
-        Setelah search + Enter + down, baca baris data dan cari yang
-        kolom 'Memo'-nya sama dengan kode yang dicari.
+        coords = bsm.get_search_click_coords()
+        if not coords:
+            return None, {"reason": "Koordinat search box tidak ditemukan"}, 0
 
-        FIX lama (masih dipertahankan): kode yang dicari itu isi kolom
-        'Memo' (dicari by nama kolom, bukan hardcode index), dan header
-        doang (1 baris ke-copy) BUKAN berarti datanya gak ada -- itu
-        biasanya grid hasil search belum ke-load.
+        pyautogui.click(coords)
+        pyautogui.hotkey("ctrl", "a")
+        pyperclip.copy(expected)
+        pyautogui.hotkey("ctrl", "v")
+        pyautogui.press("enter")
 
-        FIX BARU (biar NOT FOUND beneran NOT FOUND, bukan gara-gara
-        kecepatan): hasil baca yang "mencurigakan" gak langsung dinyatakan
-        not found. Ada 2 fase:
-          1. Retry ringan untuk SEMUA baca yang mencurigakan:
-             - clipboard KOSONG  -> tunggu sebentar lalu baca ulang
-               (jangan buru-buru nge-down, takut fokus malah pindah).
-             - cuma HEADER (1 baris) -> nge-down satu langkah ke data,
-               lalu baca ulang. Maksimal HEADER_RETRY kali.
-             - data ke-copy (>=2 baris) tapi memo gak cocok -> bisa jadi
-               grid masih nampilin hasil search KODE SEBELUMNYA (race),
-               langsung berhenti di fase 1 karena nge-down gak bakal
-               nolong; biar fase 2 yang mutusin.
-          2. Kalau masih mencurigakan, kode di-SEARCH ULANG dari awal
-             (balik ke kotak search, ketik ulang, enter, down, baca).
-             Cuma kalau setelah search ulang pun gak ketemu -> baru
-             dianggap NOT FOUND beneran. Baris yang sehat tetap cepat
-             (ketemu di baca pertama tanpa nambah waktu).
+        # Polling tunggu grid load (berbasis perubahan clipboard)
+        time.sleep(0.5)
+        pyautogui.press("tab") # keluar dari search box
+        time.sleep(0.5)
 
-        FIX TERBARU (gabung row duplikat): 1 kode pesanan (kolom Memo)
-        kadang muncul di >1 baris grid (split faktur). Sebelumnya yang
-        dipakai cuma baris PERTAMA yang cocok terus langsung berhenti.
-        Sekarang baris lain yang Memo-nya MASIH sama ikut dikumpulin
-        (lihat kumpulin_semua_baris_memo), dan caller yang mutusin baris
-        mana yang 'asli' (lihat pilih_baris_primary). Kode yang cuma 1
-        baris TIDAK ditambah delay -- kumpulin cuma nambah baca kalau
-        emang ada indikasi baris duplikat.
+        # Copy All
+        pyautogui.hotkey("ctrl", "a")
+        time.sleep(0.5)
+        pyautogui.hotkey("ctrl", "c")
+        time.sleep(0.5)
 
-        Return: (rows, debug_info, extra_down)
-          - rows       : list SEMUA baris grid yang kolom Memo-nya ==
-                         expected (bisa lebih dari 1 kalau split faktur),
-                         atau None kalau NOT FOUND
-          - debug_info : alasan gagal (cuma kepake pas NOT FOUND)
-          - extra_down : jumlah 'down' ekstra yang ditekan pas ngumpulin
-                         baris duplikat. Caller WAJIB balikin cursor ke
-                         search box dengan nekan 'up' 1 + extra_down kali
-                         (karena baris duplikat 'down'-nya nambah).
-        """
-        def baca_clipboard():
-            pyperclip.copy("")
-            time.sleep(0.05)
-            pyautogui.hotkey("ctrl", "c")
+        text = pyperclip.paste()
+        rows, cols_map, valid = parse_bsm_page(text, expected)
 
-            start = time.time()
-            text = ""
-            while time.time() - start < 0.3:
-                text = pyperclip.paste().strip()
-                if text:
-                    break
-                time.sleep(0.03)
-
-            lines = [x.strip() for x in text.splitlines() if x.strip()] if text else []
-            return lines, text
-
-        def cari_baris_memo(lines):
-            if len(lines) < 2:
-                return None
-            # Rekonstruksi baris grid yang terpecah karena ada NEWLINE
-            # literal di dalam sel (kasus nyata 2026-09-12: selalu
-            # NoPesanan berisi "XXXX\\nXXXX") — tanpa ini kode yang BENERAN
-            # ADA di grid dicap NOT FOUND (murni bug parsing clipboard).
-            # Logika murni ada di core/parsing.py (testable); di sini cuma
-            # nyambungin + catat metrik observability.
-            cols, n_gabung = cari_baris_memo_terpecah(lines, expected)
-            if n_gabung:
-                metrik["baris_terpecah"] += n_gabung
-            if cols is not None:
-                return cols
-            return None
-
-        def fase_baca():
-            """Baca clipboard + retry ringan. Return (cols, lines, text);
-            cols != None berarti baris yang dicari KETEMU."""
-            for attempt in range(HEADER_RETRY + 1):
-                lines, text = baca_clipboard()
-                if lines and kolom_idx["v"] is None:
-                    # Header ke-copy sekali aja cukup — isi kolomnya sama
-                    # sepanjang run. Kolom tak ketemu -> -1 (dianggap kosong).
-                    header_cols = lines[0].split('\t')
-                    kolom_idx["v"] = {}
-                    for nama, kunci in KOLOM_GRID.items():
-                        try:
-                            kolom_idx["v"][kunci] = header_cols.index(nama)
-                        except ValueError:
-                            kolom_idx["v"][kunci] = -1
-                cols = cari_baris_memo(lines)
-                if cols is not None:
-                    return cols, lines, text
-
-                if len(lines) >= 2:
-                    # Data ke-copy tapi memo gak cocok. Nge-down gak bakal
-                    # mengubah isi grid -> hentikan fase 1, serahkan ke
-                    # fase 2 (re-search) buat mutusin beneran ada/gak ada.
-                    return None, lines, text
-
-                if attempt < HEADER_RETRY:
-                    if not lines:
-                        # Clipboard kosong = grid hasil search belum
-                        # ke-load. Tunggu dulu biar ke-load, baca ulang
-                        # (tanpa nge-down, takut fokus kepindah).
-                        metrik["retry"] += 1
-                        if FOTO_AKTIF and metrik["foto_retry"] < FOTO_RETRY_BATAS:
-                            metrik["foto_retry"] += 1
-                            ambil_screenshot(expected, "RETRY", "clipboard_kosong")
-                        time.sleep(0.15)
-                        continue
-                    # Cuma header ke-copy -> masuk satu langkah ke data.
-                    metrik["retry"] += 1
-                    if FOTO_AKTIF and metrik["foto_retry"] < FOTO_RETRY_BATAS:
-                        metrik["foto_retry"] += 1
-                        ambil_screenshot(expected, "RETRY", "header_doang")
-                    pyautogui.press("down")
-                    time.sleep(HEADER_RETRY_DELAY)
-
-            return None, lines, text
-
-        def kumpulin_semua_baris_memo(expected, lines_awal):
-            """
-            NEW — gabung row duplikat. Baris pertama yang cocok udah
-            ketemu di `lines_awal`, sekarang kumpulin SEMUA baris yang
-            kolom Memo-nya MASIH sama dengan expected.
-
-            Strategi biar kode yang cuma punya 1 row TETAP SECEPAT DULU
-            (gak nambah baca clipboard / delay ekstra):
-              1. Dari copy yang BARUSAN (yang bikin ketemu), langsung
-                 kumpulin SEMUA baris yang Memo-nya cocok dalam satu copy
-                 itu (gratis, gak nambah down).
-              2. Kalau baris match TERAKHIR bukan baris data TERAKHIR di
-                 copy (masih ada baris lain di bawahnya yang BUKAN Memo
-                 sama) -> grup kode ini udah berakhir dalam view, LANGSUNG
-                 berhenti. Ini kasus normal (match di baris atas, di
-                 bawahnya hasil search lain), jadi 0 down tambahan.
-              3. Baru turun (down + copy ulang) KALAU baris match
-                 terakhir nyentuh baris data terakhir di copy -- artinya
-                 mungkin masih ada baris Memo sama di bawahnya yang belum
-                 ke-visible. Terus turun sampai copy berikutnya gak nambah
-                 baris baru (udah lewat grup) / clipboard kosong (mentok
-                 akhir tabel) / mentok MAX_ROW_DUPLIKAT.
-
-            Return: (rows, extra_down)
-              - rows       : list SEMUA baris (list kolom) yang Memo-nya
-                             == expected
-              - extra_down : jumlah 'down' ekstra yang ditekan. Caller
-                             WAJIB nekan 'up' 1 + extra_down kali.
-            """
-            rows = []
-            seen = set()
-
-            def memo_idx_dari(header_line):
-                try:
-                    return header_line.split('\t').index('Memo')
-                except ValueError:
-                    return 4  # fallback posisi default kalau nama kolom beda
-
-            def proses_baca(lines):
-                """Tambah baris yang Memo-nya cocok ke `rows` (dedupe by
-                baris HASIL REKONSTRUKSI (tab-joined) -- baris fisik mentah
-                sekarang bisa cuma separuh baris logis karena newline di sel).
-                Return True kalau baris match TERAKHIR nempel di baris data
-                terakhir blok ini (artinya mungkin masih ada baris Memo sama
-                di bawah yang belum ke-visible)."""
-                if len(lines) < 2:
-                    return False
-                mi = memo_idx_dari(lines[0])
-                jumlah = len(lines[0].split('\t'))
-                rows_logis, n_gabung = gabungkan_baris_terpecah(lines[1:], jumlah)
-                if n_gabung:
-                    metrik["baris_terpecah"] += n_gabung
-                # Baris yang tak sampai lengkap (ujung clipboard) tetap ada di
-                # rows_logis sebagai baris terakhir — tidak dibuang senyap.
-                lanjut = False
-                for i, row in enumerate(rows_logis):
-                    key = '\t'.join(row)
-                    if key in seen:
-                        continue
-                    if len(row) > mi and row[mi].strip() == expected and len(row) >= jumlah:
-                        seen.add(key)
-                        rows.append(row)
-                        if i == len(rows_logis) - 1:
-                            lanjut = True
-                return lanjut
-
-            extra_down = 0
-            lanjut = proses_baca(lines_awal)
-            while lanjut and len(rows) < MAX_ROW_DUPLIKAT:
-                pyautogui.press("down")
-                time.sleep(DELAY_AFTER_DOWN)
-                extra_down += 1
-                new_lines, _ = baca_clipboard()
-                lanjut = proses_baca(new_lines)
-
-            return rows, extra_down
-
-        # Fase 1: baca hasil search yang barusan.
-        cols, lines, text = fase_baca()
-        if cols is not None:
-            if GABUNG_ROW_DUPLIKAT:
-                rows, extra_down = kumpulin_semua_baris_memo(expected, lines)
+        if valid:
+            kolom_idx["v"] = cols_map
+            if rows:
+                return rows, None, 0
             else:
-                rows, extra_down = [cols], 0
-            return rows, None, extra_down
+                return None, {"reason": "Kode tidak ditemukan di halaman valid"}, 0
 
-        if RE_SEARCH_KONFIRMASI:
-            # Fase 2: konfirmasi dengan search ulang dari nol. Ini yang
-            # bikin NOT FOUND akurat: kode cuma dianggap gak ada kalau
-            # setelah diketik & di-search ulang pun tetap gak ketemu.
-            # Observability: event ini difoto + dihitung di metrik,
-            # soalnya ini tanda pasti grid sempat nampilin hasil yang
-            # mencurigakan (kemungkinan besar race kecepatan).
-            metrik["research"] += 1
-            if FOTO_AKTIF:
-                ambil_screenshot(expected, "RE_SEARCH")
-            # SAFETY-NET: sebelum paste ulang ke kotak search, pastikan
-            # teksnya beneran kode pesanan. Abort proses kalau tidak.
-            expected = validasi.cegah_ketik_tidak_aman(expected, konteks="re-search")
-            pyautogui.press("up")   # balik ke kotak search (sama seperti yang
-                                    # dilakukan caller setelah satu baris selesai)
-            time.sleep(DELAY_AFTER_UP)
-            pyautogui.hotkey("ctrl", "a")
-            pyperclip.copy(expected)
-            pyautogui.hotkey("ctrl", "v")
-            pyautogui.press("enter")
-            pyautogui.press("down")
-            tunggu_grid_respon(timeout=POLL_GRID_TIMEOUT)
-
-            cols, lines2, text2 = fase_baca()
-            if cols is not None:
-                if GABUNG_ROW_DUPLIKAT:
-                    rows, extra_down = kumpulin_semua_baris_memo(expected, lines2)
-                else:
-                    rows, extra_down = [cols], 0
-                return rows, None, extra_down
-            lines, text = lines2, text2
-
-        return None, {"reason": f"kode '{expected}' tidak ketemu: {len(lines)} baris ke-copy, memo gak cocok setelah retry{'+ 1x re-search' if RE_SEARCH_KONFIRMASI else ''}", "raw": text}, 0
+        # Jika halaman tidak valid atau gagal
+        return None, {"reason": "Halaman tidak valid"}, 0
 
     def pilih_baris_primary(rows, nomor):
         """
@@ -1419,18 +1220,6 @@ else:
             # mencoba mengetik teks mencurigakan -> ABORT seluruh proses.
             nomor = validasi.cegah_ketik_tidak_aman(nomor, konteks=f"loop scan [{index}/{len(orders)}]")
 
-            pyautogui.hotkey("ctrl", "a")
-            pyperclip.copy(nomor)
-            pyautogui.hotkey("ctrl", "v")
-            pyautogui.press("enter")
-            # Polling (bukan sleep statis): tunggu sampai aplikasi benar
-            # respons (clipboard kebaca) sebelum lanjut, timeout di atur
-            # POLL_GRID_TIMEOUT.
-            tunggu_grid_respon(timeout=POLL_GRID_TIMEOUT)
-
-            pyautogui.press("down")
-            tunggu_grid_respon(timeout=POLL_GRID_TIMEOUT)
-
             rows, debug_info, extra_down = find_data_row(nomor)
 
             if rows is not None:
@@ -1500,22 +1289,13 @@ else:
                         tanda_dup = f" | {teks_duplikat(item_belum)}" if jumlah_duplikat_row > 1 else ""
                         print(f"\n🟡 {no_faktur} | {tanggal} | {customer} | {salesman} | {memo} | Rp{harga} | BELUM | {status_retur}{tanda_validasi}{tanda_dup}")
 
-                # Balikin cursor ke search box. Dulu cuma 1 'up'; sekarang
-                # 1 'up' + extra_down (yang ditekan pas ngumpulin baris
-                # duplikat di find_data_row), biar posisi kembali persis ke
-                # kotak search buat ctrl+a di kode berikutnya.
-                for _ in range(1 + extra_down):
-                    pyautogui.press("up")
-                    time.sleep(DELAY_AFTER_UP)
+                # Posisi cursor sudah terfokus di search box karena klik koordinat.
+                # Tidak perlu press up lagi.
             else:
                 if FOTO_AKTIF:
                     ambil_screenshot(nomor, "NOT_FOUND", "final")
 
-                # LANGSUNG lanjut ke kode berikutnya (retry ringan buat kasus
-                # header udah dicoba di dalam find_data_row). 'up' tetap
-                # ditekan biar cursor balik ke search box buat ctrl+a di kode
-                # selanjutnya.
-                pyautogui.press("up")
+                # LANGSUNG lanjut ke kode berikutnya. Tidak perlu press up lagi.
 
                 # FIX BUG "RETUR tercatat TIDAK ADA FAKTUR": baris income
                 # Shopee yang retur (kolom 'Jumlah Pengembalian Dana Ke

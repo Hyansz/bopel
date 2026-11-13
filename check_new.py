@@ -5,7 +5,10 @@ import pyperclip
 import re
 import sys
 import win32gui
+import json
+from pathlib import Path
 from decimal import Decimal
+from datetime import datetime
 
 from core import window
 from core.config import Config
@@ -49,6 +52,21 @@ def _load_bsm_transfer_input_click():
         except (TypeError, ValueError):
             pass
     return (float(BSM_TRANSFER_INPUT_CLICK[0]), float(BSM_TRANSFER_INPUT_CLICK[1]))
+
+
+def get_fetch_dates():
+    path = Path("logs") / ".active_store.json"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            start = data.get("start_date")
+            end = data.get("end_date")
+            if start and end:
+                # Format ISO YYYY-MM-DD to DD-MM-YYYY
+                return datetime.strptime(start, '%Y-%m-%d').strftime('%d-%m-%Y')
+        except:
+            pass
+    return datetime.now().strftime('%d-%m-%Y')
 
 
 def safe_copy(delay=FAST, retries=4, settle=0.05, metrik=None):
@@ -126,9 +144,15 @@ def print_check_table(orders, res, shopee_prices):
     def fmt_row(r):
         return "| " + " | ".join(cell.ljust(w) for cell, w in zip(r, col_widths)) + " |"
 
-    print("\n" + "=" * 60)
-    print("TABEL KODE PESANAN + HARGA (CHECK NEW)")
-    print("=" * 60)
+    w_table = len(line())
+    left_text = "| TABEL KODE PESANAN + HARGA (CHECK NEW)"
+    right_text = f"{get_fetch_dates()} |"
+    # Adjust spacing: -3 is for the border characters | and spaces
+    spaces = max(0, w_table - len(left_text) - len(right_text) - 1)
+
+    print("\n" + "=" * w_table)
+    print(left_text + " " * spaces + right_text)
+    print("=" * w_table)
     print(line())
     print(fmt_row(headers))
     print(line('='))
@@ -267,6 +291,12 @@ def main():
             print(f"[CEK MANUAL] baris {f['baris']} kode {c}: Shopee {p2} vs aplikasi {app_nilai}")
 
     print(f"Total: {total_shopee} | Ketemu: {cocok_n} | Sudah: {ok_count} | Beda: {beda_count} | Tidak: {tidak_n}")
+    # Tambahkan pola yang cocok dengan self._summary_patterns di app.py
+    print(f"Total: {total_shopee}")
+    print(f"Ketemu: {cocok_n} / {total_shopee}")
+    print(f"Status OK: {ok_count}")
+    print(f"Beda: {beda_count}")
+    print(f"Tidak: {tidak_n}")
     print(f"Total Harga OK (Nilai): {total_ok:,}")
 
     if res["parser_problems"] or total_shopee == 0:
