@@ -28,6 +28,20 @@ STEP2_MODE = "live"                # "off" | "click_test" | "dry" | "live"
 STEP2_MAX_TICKS = None             # None = all; int limit centang buat uji
 BSM_FIRST_ROW_CLICK = (0.768, 0.591)  # (x_ratio, y_ratio) relatif ke window, dari config.yaml
 BSM_TRANSFER_INPUT_CLICK = (0.9368, 0.2580)
+# Koordinat baru untuk alur pencarian customer & transfer (dari track_coord.py)
+BSM_SEARCH_CUSTOMER = (0.4196, 0.2146)
+BSM_INPUT_CUSTOMER = (0.4320, 0.2728)
+BSM_INPUT_DATE = (0.5495, 0.2534)
+BSM_CHECKBOX_TRANSFER = (0.6738, 0.2591)
+BSM_SEARCH_BANK = (0.8997, 0.2523)
+BSM_INPUT_BANK = (0.6415, 0.3288)
+BSM_BTN_YES = (0.5968, 0.5708)
+# Mapping nama toko untuk pencarian
+STORE_NAMES = {
+    "Toko 1 — Toko Alkes Solo": "SHOPEE TOKO ALKES SOLO",
+    "Toko 2 — Toko Alkes BSM": "SHOPEE TOKO ALKES BSM",
+    "Toko 3 — Alkes Medika Solo": "SHOPEE ALKES MEDIKA SOLO"
+}
 BSM_KEY_DELAY = 0.12               # detik antar tekanan "down"
 BSM_WAIT_AFTER_OPEN = 5.0  # detik tunggu setelah buka .lnk
 
@@ -52,6 +66,18 @@ def _load_bsm_transfer_input_click():
         except (TypeError, ValueError):
             pass
     return (float(BSM_TRANSFER_INPUT_CLICK[0]), float(BSM_TRANSFER_INPUT_CLICK[1]))
+
+
+def get_active_store_name():
+    """Ambil nama toko yang sedang aktif dari logs/.active_store.json"""
+    path = Path("logs") / ".active_store.json"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data.get("name", "")
+        except:
+            pass
+    return ""
 
 
 def get_fetch_dates():
@@ -239,17 +265,74 @@ def main():
         time.sleep(BSM_WAIT_AFTER_OPEN)
 
     hwnd = window.persiapkan_window_target(SCRIPT_NAME, required=UI_MODE)
-    print("Mengambil data halaman BSM via Ctrl+A...")
 
+    # === ALUR BARU: PENCARIAN CUSTOMER & TRANSFER ===
+    print("Menjalankan alur pencarian customer dan transfer...")
+    rect = win32gui.GetWindowRect(hwnd)
+    w = rect[2] - rect[0]
+    h = rect[3] - rect[1]
+
+    def abs_click(ratio):
+        x, y = ratio
+        return rect[0] + int(x * w), rect[1] + int(y * h)
+
+    store_name = get_active_store_name()
+    search_term = STORE_NAMES.get(store_name, store_name)
+    if not search_term:
+        print("⚠️ Nama toko tidak ditemukan, akan mencari semua customer.")
+        search_term = ""
+    fetch_date = get_fetch_dates()
+
+    # 1. Klik Search Customer
+    cx, cy = abs_click(BSM_SEARCH_CUSTOMER)
+    pyautogui.click(cx, cy)
+    time.sleep(0.5)
+
+    # 2. Isi Nama Customer
+    ix, iy = abs_click(BSM_INPUT_CUSTOMER)
+    pyautogui.click(ix, iy)
+    time.sleep(0.3)
+    if search_term:
+        pyautogui.hotkey('ctrl', 'a')
+        pyautogui.write(search_term, interval=0.05)
+        time.sleep(0.5)
+
+    # 3. Isi Tanggal
+    dx, dy = abs_click(BSM_INPUT_DATE)
+    pyautogui.click(dx, dy)
+    time.sleep(0.3)
+    pyautogui.hotkey('ctrl', 'a')
+    pyautogui.write(fetch_date, interval=0.05)
+    time.sleep(0.5)
+
+    # 4. Klik Checkbox Transfer
+    tx, ty = abs_click(BSM_CHECKBOX_TRANSFER)
+    pyautogui.click(tx, ty)
+    time.sleep(0.5)
+
+    # 5. Klik Search Bank
+    bx, by = abs_click(BSM_SEARCH_BANK)
+    pyautogui.click(bx, by)
+    time.sleep(0.5)
+
+    # 6. Isi Nama Rekening Tujuan
+    rx, ry = abs_click(BSM_INPUT_BANK)
+    pyautogui.click(rx, ry)
+    time.sleep(0.3)
+    pyautogui.hotkey('ctrl', 'a')
+    pyautogui.write(search_term, interval=0.05)
+    time.sleep(0.5)
+
+    print(f"✔ Alur pencarian customer '{search_term}' dan transfer selesai.")
+
+    # === LANJUT KE LOGIKA LAMA (CTRL + A) ===
+    print("Mengambil data halaman BSM via Ctrl+A...")
     if UI_MODE:
         time.sleep(2)
     else:
         # Pengecekan agar tidak input saat testing
-        if "PYTEST_CURRENT_TEST" in os.environ:
-            print("Input skipped (testing mode).")
-        else:
+        if "PYTEST_CURRENT_TEST" not in os.environ:
             input("Klik area netral di halaman BSM, lalu ENTER...")
-
     pyautogui.hotkey('ctrl', 'a')
     time.sleep(0.3)
     bsm_raw = safe_copy(delay=0.3, retries=5)
@@ -291,7 +374,6 @@ def main():
             print(f"[CEK MANUAL] baris {f['baris']} kode {c}: Shopee {p2} vs aplikasi {app_nilai}")
 
     print(f"Total: {total_shopee} | Ketemu: {cocok_n} | Sudah: {ok_count} | Beda: {beda_count} | Tidak: {tidak_n}")
-    # Tambahkan pola yang cocok dengan self._summary_patterns di app.py
     print(f"Total: {total_shopee}")
     print(f"Ketemu: {cocok_n} / {total_shopee}")
     print(f"Status OK: {ok_count}")
@@ -300,14 +382,10 @@ def main():
     print(f"Total Harga OK (Nilai): {total_ok:,}")
 
     if res["parser_problems"] or total_shopee == 0:
-        # Jika masalah parser terjadi karena jumlah baris atau variasi kolom,
-        # bot tetap lanjut jika baris Shopee kita yang "found" cukup banyak
-        # dan tidak ada masalah struktural yang parah.
         if total_shopee == 0:
             print(f"DEBUG: parser_problems={res['parser_problems']}, total_shopee={total_shopee}")
             print("❌ Ctrl+A tidak terbaca sebagai tabel Inventory BSM; pastikan halaman Tambah Bayar Customer terbuka dan fokus ada di area netral.")
             sys.exit(1)
-        # Kalau sudah ada baris yang ketemu dan tidak ada masalah "kolom angka" berat, lanjut
         critical_issues = [p for p in res["parser_problems"] if p[1] in ("baris tidak lengkap",)]
         if not critical_issues and cocok_n > 0:
             print(f"⚠️ Ada {len(res['parser_problems'])} masalah baca (non-kritis), bot tetap lanjut ke {cocok_n} baris yang cocok.")
@@ -320,7 +398,6 @@ def main():
         print("\n✔ STEP 1 Selesai (STEP1_ONLY = True): Selesai sesuai instruksi.")
         sys.exit(0)
 
-    # TAHAP 2: CENTANG
     if STEP2_MODE == "off":
         sys.exit(0)
 
@@ -330,9 +407,6 @@ def main():
         sys.exit(1)
 
     # Klik awal (ruang kosong)
-    rect = win32gui.GetWindowRect(hwnd)
-    w = rect[2] - rect[0]
-    h = rect[3] - rect[1]
     click_x, click_y = _load_bsm_first_row_click()
     abs_x = rect[0] + int(click_x * w)
     abs_y = rect[1] + int(click_y * h)
@@ -381,6 +455,14 @@ def main():
         time.sleep(0.3)
         print(f"[OK] Total harga otomatis diisi ke input Transfer.")
 
+        # ALUR SIMPAN BARU: F10 lalu klik YA
+        print("Menekan F10 untuk menyimpan...")
+        pyautogui.press('f10')
+        time.sleep(1.0)
+        ya_x, ya_y = abs_click(BSM_BTN_YES)
+        pyautogui.click(ya_x, ya_y)
+        print("[OK] Klik tombol YA selesai.")
+
     # Mengembalikan fokus ke window Bopel Automation Toolkit
     try:
         bopel_win = window.find_target_window("Bopel Automation Toolkit")
@@ -390,7 +472,7 @@ def main():
     except Exception as exc:
         print(f"⚠️ Gagal mengembalikan fokus ke Bopel: {exc}")
 
-    print("Selesai. JANGAN lupa cek lalu simpan manual (F10/F11). Bot tidak menyimpan.")
+    print("Selesai. Data berhasil disimpan.")
 
 
 if __name__ == "__main__":

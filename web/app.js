@@ -58,6 +58,9 @@ function hydrateIcons() {
   });
 }
 
+// Mode default
+const DEFAULT_TOOL_MODE = { "scan.py": "Scan Kode Pesanan" };
+
 /* ── state global ─────────────────────────────────────────────────── */
 let TOOLS = DEFAULT_TOOLS;
 let currentTool = null;          // { name, script, description, ... }
@@ -120,6 +123,15 @@ function renderSidebar(tools) {
     if (currentTool && currentTool.script === t.script && isSectionActive("tool")) btn.classList.add("active");
     box.appendChild(btn);
   }
+  // Tambahkan tombol Sales Order (SOON)
+  const soBtn = document.createElement("button");
+  soBtn.className = "sb-item";
+  soBtn.dataset.nav = "so";
+  soBtn.setAttribute("aria-label", "Sales Order");
+  soBtn.innerHTML = `<span class="sb-icon">${svg("doc")}</span><span class="sb-label">Sales Order</span>`;
+  if (isSectionActive("so")) soBtn.classList.add("active");
+  box.appendChild(soBtn);
+
   refreshSidebarStates();
 }
 
@@ -190,6 +202,9 @@ function onNavClick(e) {
     showSection("dashboard");
     renderDashboard();
     refreshSystemInfo();
+  } else if (nav === "so") {
+    setActiveNav(btn);
+    showSection("so");
   } else if (nav === "logs") {
     setActiveNav(btn);
     showSection("logs");
@@ -413,7 +428,9 @@ function refreshModeButtons(tool) {
   );
   const fetchRunning = !!(toolStates["shopee_fetch.py"] && toolStates["shopee_fetch.py"].running);
   document.querySelectorAll("#mode-btns .btn.choice, #data-mode-btns .btn.choice").forEach((b) => (b.disabled = running || fetchRunning));
-  $("#fetch-btn").disabled = running || fetchRunning;
+  // Guard: fetch-btn mungkin tidak ada (di-hapus dari HTML)
+  const fb = $("#fetch-btn");
+  if (fb) fb.disabled = running || fetchRunning;
 }
 
 function syncZones() {
@@ -476,6 +493,19 @@ function renderToolHeader(tool) {
   $("#tool-desc").textContent = tool.description || "";
   renderModeSeg(tool);
   if (needsDataMode(tool)) dataMode = "otomatis"; // Default ke mode otomatis
+
+  // Aktifkan mode default untuk tool dengan mode (misal: Scan Kode Pesanan)
+  if (tool.modes && tool.modes.length > 0) {
+    const defaultMode = DEFAULT_TOOL_MODE[tool.script];
+    if (defaultMode) {
+      const mode = tool.modes.find((m) => m.name === defaultMode);
+      if (mode) {
+        lastModeRun[tool.script] = mode.name;
+        activeRun = { key: runKey(tool.script, mode.name), script: mode.script || tool.script };
+      }
+    }
+  }
+
   fetchRange = null;
   refreshModeButtons(tool);
   renderDataModeButtons(tool);
@@ -522,7 +552,15 @@ function applyDataModeUI(tool) {
   $("#store-btns").classList.toggle("hidden", !showZone || isShot);
   $("#store-group").classList.toggle("hidden", !showZone || isShot);
   $("#date-range").classList.toggle("hidden", !showZone);
-  $("#fetch-btn").classList.toggle("hidden", !isAuto);
+
+  // Logika baru: Fetch hanya muncul di Checklist Automation (check_new.py / check.py)
+  const isChecklist = tool && (tool.script === "check_new.py" || tool.script === "check.py");
+  const fetchBtn = $("#fetch-btn");
+  if (fetchBtn) {
+    // Sembunyikan jika tool bukan checklist, atau jika mode bukan otomatis
+    fetchBtn.classList.toggle("hidden", !(isChecklist && isAuto));
+  }
+
   if (showZone) {
     if (!isShot) renderStoreButtons(tool);
     renderDateRange();
@@ -1186,8 +1224,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelector(".sidebar").addEventListener("click", onNavClick);
   $("#start-btn").addEventListener("click", onStart);
   $("#stop-btn").addEventListener("click", onStop);
-  $("#fetch-btn").addEventListener("click", onFetchClick);
-  $("#scroll-toggle").addEventListener("click", () => { if (logPaused) scrollLog(true); else setPaused(true); });
+  const fetchBtn = $("#fetch-btn");
+  if (fetchBtn) fetchBtn.addEventListener("click", onFetchClick);
+  $("#scroll-toggle").addEventListener("click", () => { if (logPaused) scrollLog(true); else setPaused(false); });
   $("#tool-log").addEventListener("scroll", (e) => {
     const el = e.currentTarget;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;

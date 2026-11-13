@@ -61,7 +61,10 @@
     <!-- ═══ SIDEBAR: navigasi saja ═══ -->
     <aside class="sidebar" aria-label="Navigasi utama">
       <div class="sb-group-label">Tool</div>
-      <nav class="sb-nav" id="sidebar-tools"><!-- dirender app.js dari config.yaml --></nav>
+      <nav class="sb-nav" id="sidebar-tools">
+        <!-- dirender app.js dari config.yaml, tombol SO ditambahkan secara manual -->
+        <button class="sb-item" data-nav="so" aria-label="Sales Order"><span class="sb-icon" data-icon="doc"></span><span class="sb-label">Sales Order</span></button>
+      </nav>
       <div class="sb-group-label">Umum</div>
       <nav class="sb-nav">
         <button class="sb-item active" data-nav="dashboard" aria-label="Dashboard" aria-current="page"><span class="sb-icon" data-icon="grid"></span><span class="sb-label">Dashboard</span></button>
@@ -201,6 +204,21 @@
               <div class="log-empty" id="log-empty"><span data-icon="terminal" data-size="28"></span><span id="log-empty-text">Belum ada output.</span></div>
             </div>
           </section>
+        </section>
+
+        <!-- ── SALES ORDER (SEGERA) ── -->
+        <section class="screen so" data-section="so">
+          <header class="page-head">
+            <div class="page-titles">
+              <h2>Sales Order</h2>
+              <p>Manajemen pesanan penjualan.</p>
+            </div>
+          </header>
+          <div class="card so-card">
+            <h3 class="card-title">Segera Hadir</h3>
+            <p class="card-text">Fitur Sales Order sedang dalam pengembangan. Silakan nantikan update berikutnya.</p>
+            <span class="badge" data-status="wait">SOON</span>
+          </div>
         </section>
 
         <!-- ── LOG ── -->

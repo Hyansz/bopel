@@ -186,6 +186,10 @@ class Api:
             (re.compile(r"Status OK\s*:\s*(\d+)"), "ok"),
             (re.compile(r"Tidak\s*:\s*(\d+)"), "notfound"),
             (re.compile(r"Not Found\s*:\s*(\d+)"), "notfound"),
+            (re.compile(r"🟢 Sukses\s*:\s*(\d+)"), "ok"),
+            (re.compile(r"🟢 Sudah\s*:\s*(\d+)"), "ok"),
+            (re.compile(r"🟡 Cek manual\s*:\s*(\d+)"), "beda"),
+            (re.compile(r"🟡 Belum\s*:\s*(\d+)"), "beda"),
             # "≠ Beda   : 3 (tidak di-checklist)" (check.py) — item ketemu tapi
             # harga beda / butuh cek manual. BELUM ada di Textual (ui/dashboard.py
             # _SUMMARY_PATTERNS cuma 4 metrik) — card ke-5 ini fitur baru, bukan

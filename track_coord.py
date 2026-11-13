@@ -12,7 +12,6 @@ def bring_terminal_to_front():
             return
         title = win32gui.GetWindowText(hwnd).lower()
         if any(k in title for k in ["python", "powershell", "cmd.exe", "command prompt", "bopel"]):
-            # Pastikan bukan window BSM
             if "inventory bsm" not in title:
                 try:
                     activate_window(hwnd)
@@ -49,16 +48,16 @@ def track():
     time.sleep(1.0)
 
     # 3. Navigasi: ALT + 4, lalu F2
-    print("Menekan ALT + 3...")
-    pyautogui.hotkey('alt', '3')
+    print("Menekan ALT + 4...")
+    pyautogui.hotkey('alt', '4')
     time.sleep(0.8)
 
-    print("Menekan F5...")
-    pyautogui.press('f5')
+    print("Menekan F2...")
+    pyautogui.press('f2')
     time.sleep(1.0)
 
     # 4. Tunggu 8 detik bagi user untuk mengarahkan mouse
-    print("\n[PERHATIAN] Arahkan kursor mouse ke kolom input Transfer sekarang!")
+    print("\n[PERHATIAN] Arahkan kursor mouse ke posisi yang diinginkan!")
     for i in range(8, 0, -1):
         print(f"Merekam posisi dalam {i} detik...")
         time.sleep(1)
@@ -71,11 +70,17 @@ def track():
     rel_x = (x - rect[0]) / w
     rel_y = (y - rect[1]) / h
 
-    # 5. Kembalikan fokus ke terminal
+    # 5. Tutup window Inventory BSM
+    print("\nMenutup window 'Inventory BSM'...")
     bring_terminal_to_front()
+    time.sleep(0.5)
+    try:
+        win32gui.PostMessage(hwnd, 0x0010, 0, 0) # WM_CLOSE
+    except Exception as e:
+        print(f"Gagal menutup otomatis: {e}")
 
     print("\n" + "=" * 40)
-    print("HASIL TRACKING KORDINAT TRANSFER INPUT:")
+    print("HASIL TRACKING KORDINAT:")
     print(f"  Posisi Layar (Absolute) : {x}, {y}")
     print(f"  Window Rect (L, T, R, B): {rect}")
     print(f"  Ukuran Window           : {w}x{h}")

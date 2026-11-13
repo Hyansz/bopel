@@ -1,85 +1,62 @@
-"""Parser untuk halaman Inventory BSM versi baru.
-Menerima teks halaman (dari Ctrl+A + Ctrl+C) dan kode pesanan yang dicari,
-mengembalikan (rows, kolom_idx, halaman_valid).
-"""
 import re
 
-def parse_bsm_page(text: str, expected_code: str):
-    """Parse teks halaman Inventory BSM."""
-    if not text or not text.strip():
-        return [], {}, False
+def parse_bsm_page(text: str, kode: str):
+    """Parse teks halaman Inventory BSM dengan memproses per blok transaksi."""
+    rows = []
 
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if len(lines) < 1:
-        return [], {}, False
+    # Pisahkan teks menjadi blok-blok transaksi berdasarkan awalan "09-FP"
+    blocks = re.split(r'(?=^09-FP\.)', text, flags=re.MULTILINE)
 
-    header_idx = -1
-    cols_map = {}
-    expected_headers = ["nomor", "tanggal", "memo", "salesman", "customer", "total", "retur", "status", "pelunasan"]
+    clean_kode = re.sub(r'\s+', '', kode).lower()
 
-    for i, line in enumerate(lines):
-        parts = [p.strip() for p in re.split(r'\t+|\s{2,}', line)]
-        lower_parts = [p.lower() for p in parts]
-        matches = sum(1 for h in expected_headers if any(h in p for p in lower_parts))
-        if matches >= 2 or "memo" in lower_parts or "pesanan" in lower_parts:
-            header_idx = i
-            for idx, p in enumerate(parts):
-                pl = p.lower()
-                if "nomor" in pl or "faktur" in pl: cols_map["nomor"] = idx
-                elif "tanggal" in pl and "cair" not in pl and "lepas" not in pl: cols_map["tanggal"] = idx
-                elif "memo" in pl or "pesanan" in pl or "kode" in pl: cols_map["memo"] = idx
-                elif "sales" in pl: cols_map["salesman"] = idx
-                elif "customer" in pl or "pelanggan" in pl or "toko" in pl: cols_map["customer"] = idx
-                elif "total" in pl or "harga" in pl or "nilai" in pl: cols_map["total"] = idx
-                elif "retur" in pl: cols_map["retur"] = idx
-                elif "status" in pl or "bayar" in pl: cols_map["status"] = idx
-                elif "pelunasan" in pl: cols_map["pelunasan"] = idx
-            break
+    for block in blocks:
+        block = block.strip()
+        if not block: continue
 
-    print(f"[DEBUG PARSING] Cols Map: {cols_map}")
+        # Cari kode di baris data faktur (baris yang dimulai dengan 09-FP.)
+        # Dan cek apakah baris tersebut mengandung kode yang dicari
+        lines = block.splitlines()
 
-    if header_idx == -1:
-        cols_map = {
-            "nomor": 0, "tanggal": 3, "memo": 2, "salesman": 8,
-            "customer": 9, "total": 10, "retur": 12, "status": 17, "pelunasan": 18
-        }
-        data_lines = lines
-    else:
-        data_lines = lines[header_idx + 1:]
+        for line in lines:
+            if line.startswith("09-FP."):
+                parts = [p.strip() for p in line.split('\t')]
+                # Contoh: 09-FP.2611.0287    09-SO.2611.0330    261028SQ0E28KN ...
+                # Kolom memo ada di index 2
+                if len(parts) > 2:
+                    val = re.sub(r'\s+', '', parts[2]).lower()
 
-    halaman_valid = True
-    matched_rows = []
-    clean_expected = re.sub(r'\s+', '', expected_code).lower()
-    memo_idx = cols_map.get("memo", 2)
+                    if val == clean_kode:
+                        # Ditemukan, sekarang tentukan status bayar
+                        # Status bayar biasanya ada di baris setelah baris faktur
+                        # atau di kolom ke-19 (berdasarkan contoh, status ada di sana)
 
-    print(f"[DEBUG PARSING] Memo Index: {memo_idx}")
+                        # Cara lebih akurat: cari kata status di seluruh blok
+                        status = "belum"
+                        # Cari baris yang mengandung 'Sudah' atau 'Belum'
+                        # Contoh baris: "Belum    Tidak        GUDANG    Belum    Non Cash    Tidak    Tidak"
+                        # Kita ambil baris yang mengandung Status Bayar (setelah TOTAL atau di baris tertentu)
 
-    for line in data_lines:
-        parts = [p.strip() for p in re.split(r'\t+|\s{2,}', line)]
-        if len(parts) > memo_idx:
-            val = re.sub(r'\s+', '', parts[memo_idx]).lower()
-            if val == clean_expected:
-                # Perbaikan: cari status di dalam baris yang cocok (cari kata kunci)
-                status = "belum"
-                # Cari di seluruh baris
-                for p in parts:
-                    if p.lower() in ["sudah", "paid", "lunas"]:
-                        status = "sudah"
+                        # Debug: lihat baris yang ada di block
+                        # print(f"[DEBUG] Block: {block}")
+
+                        if re.search(r'\b(sudah|paid|lunas)\b', block, re.IGNORECASE):
+                            status = "sudah"
+
+                        # Buat row untuk scan.py
+                        row = [""] * 20
+                        # Isi kolom dari parts faktur
+                        for i, p in enumerate(parts):
+                            if i < 20: row[i] = p
+
+                        row[2] = parts[2] # Memo
+                        row[19] = status # Status
+
+                        rows.append(row)
                         break
 
-                # Tambahkan/Update status
-                if "status" in cols_map:
-                    idx = cols_map["status"]
-                    if idx < len(parts):
-                        parts[idx] = status
-                    else:
-                        parts.append(status)
-                        cols_map["status"] = len(parts) - 1
-                else:
-                    parts.append(status)
-                    cols_map["status"] = len(parts) - 1
+    kolom_idx = {
+        "nomor": 0, "pelunasan": 3, "tanggal": 4, "memo": 2,
+        "salesman": 8, "customer": 10, "total": 11, "retur": 13, "status": 19
+    }
 
-                print(f"[DEBUG PARSING] Cocok ditemukan: {parts}, Status: {status}")
-                matched_rows.append(parts)
-
-    return matched_rows, cols_map, halaman_valid
+    return rows, kolom_idx, {"valid": True}
