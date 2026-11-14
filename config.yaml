@@ -10,7 +10,7 @@ tools:
     target_window_title: Inventory BSM
     uses_stores: true
     shortcut: C:\Users\PC\Desktop\Inventory BSM.lnk
-    bsm_first_row_click: [0.768, 0.591]
+    bsm_first_row_click: [0.9485, 0.6199]
     bsm_transfer_input_click: [0.9368, 0.2580]
 
   - name: Screenshot Iklan
