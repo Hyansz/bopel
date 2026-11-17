@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Python -m pytest",
-      "Python -m pyflakes",
-      "Node --check"
-    ]
-  }
-}
