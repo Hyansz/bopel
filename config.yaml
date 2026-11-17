@@ -1,0 +1,84 @@
+app:
+  name: Bopel Automation Toolkit
+  version: "2.0.0"
+  subtitle: Internal Warehouse Utilities
+
+tools:
+  - name: Checklist Automation
+    script: check_new.py
+    description: Checklist pesanan dan validasi harga Shopee vs aplikasi (Inventory BSM)
+    target_window_title: Inventory BSM
+    uses_stores: true
+    shortcut: C:\Users\PC\Desktop\Inventory BSM.lnk
+    bsm_first_row_click: [0.9485, 0.6199]
+    bsm_transfer_input_click: [0.9368, 0.2580]
+
+  - name: Screenshot Iklan
+    script: screenshot_iklan.py
+    description: Screenshot chart dashboard iklan Shopee per toko & rentang tanggal
+    uses_stores: true
+    date_range: true
+    caption_di_gambar: false
+
+  - name: Inventory Scanner
+    script: scan.py
+    description: Scan status pembayaran dan validasi Excel
+    target_window_title: Inventory BSM
+    shortcut: C:\Users\PC\Desktop\Inventory BSM.lnk
+    bsm_search_click: [0.4512, 0.2089]
+    # 2 mode eksekusi: 1 tool, beberapa tombol.
+    # Auto-detect dari format clipboard (tabel Excel 'No. Pesanan' = besar/detail, kode polos = kecil/kode pesanan).
+    modes:
+      - name: Scan Kode Pesanan
+        description: Data detail, jumlah sedikit — clipboard berisi daftar kode polos atau hasil copy Dana Dilepaskan Shopee (kode + harga otomatis untuk validasi)
+      - name: Scan Detail
+        description: Data agak banyak + detail periode tertentu — clipboard berisi tabel Excel mutasi Shopee (kolom 'No. Pesanan')
+
+# Toko Shopee yang bisa dijadikan sumber Auto-Fetch (selector di UI).
+# Pola mirip tools[].modes: nambah toko baru = edit config saja.
+# Ketiga toko AKTIF (2026-08-20): URL income SAMA untuk semua toko
+# (INCOME_URL di shopee_fetch.py) — hanya profile Chrome yang beda.
+# shortcut: path .lnk toko di desktop (WAJIB untuk toko enabled) — bot
+# menjalankannya persis seperti double-click user, lalu menempel ke window
+# Chrome toko (lihat shopee_fetch.py; pengganti Playwright/CDP 2026-08-19:
+# Chrome 136+ mengabaikan remote-debugging-port pada user data dir default).
+# chrome_user_data_dir + profile_directory diambil dari shortcut .lnk toko
+# (Langkah 0 investigasi 2026-08-19 & diverifikasi ulang 2026-08-20) —
+# jangan ditebak (dipakai sebagai dokumentasi; fetch tidak lagi membuka
+# profil via Playwright).
+# akun: nama akun Shopee toko (muncul di sidebar seller center, terbaca
+# lewat Ctrl+A/C) — dipakai shopee_fetch.py untuk VERIFIKASI identitas
+# window sebelum fetch: window yang terangkat harus memuat token ini di
+# halamannya. Ground truth 2026-08-22 (Ctrl+A/C tiap window toko).
+stores:
+  - name: Toko 1 — Toko Alkes Solo
+    enabled: true
+    shortcut: C:\Users\PC\Desktop\Toko Alkes Solo.lnk
+    akun: tokoalkessolo
+    chrome_user_data_dir: C:\Users\PC\AppData\Local\Google\Chrome\User Data
+    profile_directory: Profile 7
+  - name: Toko 2 — Toko Alkes BSM
+    enabled: true
+    shortcut: C:\Users\PC\Desktop\Toko Alkes BSM.lnk
+    akun: tokoalkesbsm
+    chrome_user_data_dir: C:\Users\PC\AppData\Local\Google\Chrome\User Data
+    profile_directory: Profile 10
+  - name: Toko 3 — Alkes Medika Solo
+    enabled: true
+    shortcut: C:\Users\PC\Desktop\Alkes Medika Solo.lnk
+    akun: alkesmedikasolo
+    chrome_user_data_dir: C:\Users\PC\AppData\Local\Google\Chrome\User Data
+    profile_directory: Profile 9
+
+paste_macro:
+  hotkey: "Ctrl+Alt+V"
+  hotkey_cadangan:
+    - "Ctrl+Alt+Shift+V"
+    - "Ctrl+Shift+F9"
+  enabled: true
+  delay_setelah_gambar: 1.5
+  delay_antar_toko: 1.0
+
+logging:
+  level: INFO
+  file: logs/app.log

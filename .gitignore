@@ -1,0 +1,36 @@
+# Build/Tool Artifacts
+graphify-out/
+__pycache__/
+*.pyc
+*.pyo
+*.db*
+logs/
+log/
+tool-output/
+
+# IDE/Agent Config (Project bloat)
+.agent*
+.claude
+.cursor
+.devin
+.gemini
+.hermes
+.impeccable
+.kiro
+.omp
+.opencode
+.pytest_cache
+.qoder
+
+# Project Internal/Temp Data
+screenshots_spa/
+snapshot/
+shell/
+repos/
+*.lnk
+auth.json
+.env
+a.txt
+b.txt
+c.txt
+out.txt
